@@ -2,9 +2,11 @@ import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
+import nodemailer from 'nodemailer';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { sendPoolMessage } from './channels/telegram.js';
+import { readEnvFile } from './env.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -27,6 +29,19 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+
+function createEmailTransporter() {
+  const env = readEnvFile(['ICLOUD_EMAIL', 'ICLOUD_APP_PASSWORD']);
+  const user = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
+  const pass = process.env.ICLOUD_APP_PASSWORD || env.ICLOUD_APP_PASSWORD;
+  if (!user || !pass) return null;
+  return nodemailer.createTransport({
+    host: 'smtp.mail.me.com',
+    port: 587,
+    secure: false,
+    auth: { user, pass },
+  });
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -64,6 +79,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       const isMain = folderIsMain.get(sourceGroup) === true;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      const emailsDir = path.join(ipcBaseDir, sourceGroup, 'emails');
 
       // Process messages from this group's IPC directory
       try {
@@ -154,6 +170,45 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process outbound emails from this group's IPC directory
+      try {
+        if (fs.existsSync(emailsDir)) {
+          const emailFiles = fs
+            .readdirSync(emailsDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of emailFiles) {
+            const filePath = path.join(emailsDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              if (data.type === 'send_email' && data.to && data.subject && data.body) {
+                const transporter = createEmailTransporter();
+                if (!transporter) {
+                  logger.warn({ sourceGroup }, 'Email IPC received but ICLOUD_EMAIL/ICLOUD_APP_PASSWORD not configured');
+                } else {
+                  const env = readEnvFile(['ICLOUD_EMAIL']);
+                  const from = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
+                  await transporter.sendMail({
+                    from,
+                    to: data.to,
+                    subject: data.subject,
+                    text: data.body,
+                  });
+                  logger.info({ to: data.to, subject: data.subject, sourceGroup }, 'Email sent via iCloud SMTP');
+                }
+              }
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error({ file, sourceGroup, err }, 'Error processing IPC email');
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+            }
+          }
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC emails directory');
       }
     }
 
