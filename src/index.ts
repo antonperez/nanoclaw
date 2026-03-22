@@ -6,11 +6,13 @@ import {
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
+import { initBotPool } from './channels/telegram.js';
 import {
   getChannelFactory,
   getRegisteredChannelNames,
@@ -597,6 +599,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -642,10 +648,11 @@ async function main(): Promise<void> {
 }
 
 // Guard: only run when executed directly, not when imported by tests
+// decodeURIComponent normalizes encoding differences (e.g. ~ vs %7E in iCloud paths)
 const isDirectRun =
   process.argv[1] &&
-  new URL(import.meta.url).pathname ===
-    new URL(`file://${process.argv[1]}`).pathname;
+  decodeURIComponent(new URL(import.meta.url).pathname) ===
+    decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
 
 if (isDirectRun) {
   main().catch((err) => {

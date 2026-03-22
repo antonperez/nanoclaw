@@ -11,20 +11,41 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
+/**
+ * Hostname containers use to reach the host machine.
+ * Apple Container uses a vmnet bridge — host is always 192.168.64.1 on macOS.
+ * Override via CONTAINER_HOST_GATEWAY env var if your setup differs.
+ */
+export const CONTAINER_HOST_GATEWAY =
+  process.env.CONTAINER_HOST_GATEWAY || detectHostGateway();
+
+function detectHostGateway(): string {
+  // Apple Container (macOS): find the bridge100 interface IP (host side of the VM network)
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    if (name.startsWith('bridge')) {
+      const ipv4 = ifaces[name]?.find((a) => a.family === 'IPv4' && a.address.startsWith('192.168.64.'));
+      if (ipv4) return ipv4.address;
+    }
+  }
+  // Fallback: Docker Desktop hostname (works if migrating back to Docker)
+  return 'host.docker.internal';
+}
 
 /**
  * Address the credential proxy binds to.
+ * Apple Container (macOS): bind to 0.0.0.0 so container VMs can reach it via the bridge IP.
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
- * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
- *   falling back to 0.0.0.0 if the interface isn't found.
+ * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it.
  */
 export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
+  if (os.platform() === 'darwin') {
+    // Apple Container uses a real VM network — bind to all interfaces so containers can reach the proxy
+    return '0.0.0.0';
+  }
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
