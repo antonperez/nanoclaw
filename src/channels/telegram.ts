@@ -43,6 +43,8 @@ async function sendTelegramMessage(
 
 // Bot pool for agent teams: send-only Api instances (no polling)
 const poolApis: Api[] = [];
+// Lowercase usernames of pool bots (index matches poolApis)
+const poolBotUsernames: string[] = [];
 // Maps "{groupFolder}:{senderName}" → pool Api index for stable assignment
 const senderBotMap = new Map<string, number>();
 let nextPoolIndex = 0;
@@ -59,6 +61,7 @@ export async function initBotPool(tokens: string[]): Promise<void> {
       const api = new Api(token);
       const me = await api.getMe();
       poolApis.push(api);
+      poolBotUsernames.push((me.username || '').toLowerCase());
       logger.info(
         { username: me.username, id: me.id, poolSize: poolApis.length },
         'Pool bot initialized',
@@ -96,21 +99,35 @@ export async function sendPoolMessage(
   const key = `${groupFolder}:${sender}`;
   let idx = senderBotMap.get(key);
   if (idx === undefined) {
-    idx = nextPoolIndex % poolApis.length;
-    nextPoolIndex++;
-    senderBotMap.set(key, idx);
-    try {
-      await poolApis[idx].setMyName(sender);
-      await new Promise((r) => setTimeout(r, 2000));
+    // Identity routing: if sender matches a pool bot's own username, use that
+    // bot directly without renaming (bot already has the right name).
+    const senderLower = sender.toLowerCase().replace(/^@/, '');
+    const identityIdx = poolBotUsernames.indexOf(senderLower);
+    if (identityIdx !== -1) {
+      idx = identityIdx;
+      senderBotMap.set(key, idx);
       logger.info(
         { sender, groupFolder, poolIndex: idx },
-        'Assigned and renamed pool bot',
+        'Assigned pool bot by identity (no rename)',
       );
-    } catch (err) {
-      logger.warn(
-        { sender, err },
-        'Failed to rename pool bot (sending anyway)',
-      );
+    } else {
+      // Fallback: round-robin assignment with rename
+      idx = nextPoolIndex % poolApis.length;
+      nextPoolIndex++;
+      senderBotMap.set(key, idx);
+      try {
+        await poolApis[idx].setMyName(sender);
+        await new Promise((r) => setTimeout(r, 2000));
+        logger.info(
+          { sender, groupFolder, poolIndex: idx },
+          'Assigned and renamed pool bot',
+        );
+      } catch (err) {
+        logger.warn(
+          { sender, err },
+          'Failed to rename pool bot (sending anyway)',
+        );
+      }
     }
   }
 
