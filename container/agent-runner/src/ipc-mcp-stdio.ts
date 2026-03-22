@@ -20,6 +20,13 @@ const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
+// Optional team chat JID — read from group workspace if configured.
+// When set, send_message defaults to the team chat when a sender identity is specified.
+const teamChatJidFile = path.join('/workspace/group', 'team-chat-jid');
+const teamChatJid = fs.existsSync(teamChatJidFile)
+  ? fs.readFileSync(teamChatJidFile, 'utf-8').trim()
+  : undefined;
+
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
 
@@ -45,11 +52,17 @@ server.tool(
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    chat_jid: z.string().optional().describe('Target chat JID. Defaults to the current chat. Use to send to a different chat (e.g. a team group).'),
   },
   async (args) => {
+    // If a sender (worker bot identity) is set and a team chat is configured,
+    // default to the team chat so workers don't need to pass chat_jid explicitly.
+    const resolvedChatJid =
+      args.chat_jid ||
+      (args.sender && teamChatJid ? teamChatJid : chatJid);
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: resolvedChatJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
