@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const EMAILS_DIR = path.join(IPC_DIR, 'emails');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -343,6 +344,30 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+server.tool(
+  'send_email',
+  'Send an email via iCloud SMTP. Use for notifications, summaries, or any content better delivered by email.',
+  {
+    to: z.string().describe('Recipient email address'),
+    subject: z.string().describe('Email subject line'),
+    body: z.string().describe('Email body (plain text)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'send_email',
+      to: args.to,
+      subject: args.subject,
+      body: args.body,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(EMAILS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Email queued to ${args.to}.` }] };
   },
 );
 
