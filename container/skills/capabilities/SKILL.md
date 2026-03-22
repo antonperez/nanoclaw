@@ -52,6 +52,7 @@ The NanoClaw MCP server exposes these tools (via `mcp__nanoclaw__*` prefix):
 - `cancel_task` — cancel and delete a task
 - `update_task` — update an existing task
 - `register_group` — register a new chat/group (main only)
+- `send_email` — send an email via iCloud SMTP
 
 ### 4. Container skills (Bash tools)
 
