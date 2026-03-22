@@ -1,0 +1,85 @@
+{
+  "version": "1.0.0",
+  "project": "nanoclaw",
+  "stack": "Node.js 20+ / TypeScript / ESM / Vitest / SQLite",
+  "principles": [
+    {
+      "id": "esm-imports",
+      "rule": "All TypeScript imports must use .js extension (ESM requirement), even when importing .ts source files",
+      "enforcement": "mandatory",
+      "examples": {
+        "correct": "import { foo } from './foo.js'",
+        "incorrect": "import { foo } from './foo'"
+      }
+    },
+    {
+      "id": "no-secrets-in-containers",
+      "rule": "API keys and secrets must NEVER be passed to containers directly. All AI/external API calls from containers must route through the credential proxy (port 3001 / unix socket)",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "db-access-through-db-module",
+      "rule": "All database access must go through src/db.ts exported functions. No raw SQL or direct better-sqlite3 calls in other modules.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "config-no-secrets",
+      "rule": "src/config.ts may only export non-secret configuration values read from env. Secrets belong exclusively in credential-proxy.ts.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "channel-self-registration",
+      "rule": "Channels must use the self-registration pattern: call registerChannel(name, factory) at module load. Factory returns null when credentials are missing.",
+      "enforcement": "mandatory",
+      "examples": {
+        "correct": "registerChannel('slack', (opts) => credentials ? new SlackChannel(opts) : null)"
+      }
+    },
+    {
+      "id": "validate-mount-paths",
+      "rule": "All container mount paths must be validated against the mount allowlist (mount-security.ts) before spawning containers. Never bypass mount security.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "no-catch-all",
+      "rule": "Never use bare catch blocks or catch(e: any). Always type or narrow errors. Use the eslint-plugin-no-catch-all rules.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "structured-logging",
+      "rule": "Always use structured logging: logger.info({ key: value }, 'message'). Never use console.log in src/.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "colocated-tests",
+      "rule": "Test files must be colocated with source files (foo.test.ts next to foo.ts). No separate test directory.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "no-over-engineering",
+      "rule": "Do not add abstractions, helpers, or utilities for one-time operations. Minimum complexity for current task. Three similar lines is better than a premature abstraction.",
+      "enforcement": "strong"
+    },
+    {
+      "id": "no-new-files-without-need",
+      "rule": "Prefer editing existing files over creating new ones. Only create new files when clearly necessary (new channel, new module).",
+      "enforcement": "strong"
+    },
+    {
+      "id": "main-group-privilege",
+      "rule": "Only groups with isMain: true have unrestricted trigger access and can execute privileged operations (register groups, schedule tasks, remote control).",
+      "enforcement": "mandatory"
+    }
+  ],
+  "code_quality": {
+    "max_function_lines": 50,
+    "prefer_explicit_types": true,
+    "no_any_in_new_code": true
+  },
+  "security": {
+    "no_secrets_in_env_exports": true,
+    "validate_ipc_commands": true,
+    "validate_mount_paths": true,
+    "sender_allowlist_respected": true
+  }
+}
