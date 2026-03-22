@@ -182,10 +182,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(emailsDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'send_email' && data.to && data.subject && data.body) {
+              if (
+                data.type === 'send_email' &&
+                data.to &&
+                data.subject &&
+                data.body
+              ) {
                 const transporter = createEmailTransporter();
                 if (!transporter) {
-                  logger.warn({ sourceGroup }, 'Email IPC received but ICLOUD_EMAIL/ICLOUD_APP_PASSWORD not configured');
+                  logger.warn(
+                    { sourceGroup },
+                    'Email IPC received but ICLOUD_EMAIL/ICLOUD_APP_PASSWORD not configured',
+                  );
                 } else {
                   const env = readEnvFile(['ICLOUD_EMAIL']);
                   const from = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
@@ -195,20 +203,32 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     subject: data.subject,
                     text: data.body,
                   });
-                  logger.info({ to: data.to, subject: data.subject, sourceGroup }, 'Email sent via iCloud SMTP');
+                  logger.info(
+                    { to: data.to, subject: data.subject, sourceGroup },
+                    'Email sent via iCloud SMTP',
+                  );
                 }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
-              logger.error({ file, sourceGroup, err }, 'Error processing IPC email');
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC email',
+              );
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
             }
           }
         }
       } catch (err) {
-        logger.error({ err, sourceGroup }, 'Error reading IPC emails directory');
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC emails directory',
+        );
       }
     }
 
