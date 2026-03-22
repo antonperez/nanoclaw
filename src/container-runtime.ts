@@ -20,17 +20,13 @@ export const CONTAINER_HOST_GATEWAY =
   process.env.CONTAINER_HOST_GATEWAY || detectHostGateway();
 
 function detectHostGateway(): string {
-  // Apple Container (macOS): find the bridge100 interface IP (host side of the VM network)
-  const ifaces = os.networkInterfaces();
-  for (const name of Object.keys(ifaces)) {
-    if (name.startsWith('bridge')) {
-      const ipv4 = ifaces[name]?.find(
-        (a) => a.family === 'IPv4' && a.address.startsWith('192.168.64.'),
-      );
-      if (ipv4) return ipv4.address;
-    }
+  if (os.platform() === 'darwin') {
+    // Apple Container (macOS): vmnet bridge host IP is always 192.168.64.1.
+    // Do NOT detect at runtime — bridge100 only exists while a container is
+    // running, so detection at startup would fall through to the Docker fallback.
+    return '192.168.64.1';
   }
-  // Fallback: Docker Desktop hostname (works if migrating back to Docker)
+  // Fallback: Docker Desktop hostname (works on Linux/WSL with Docker)
   return 'host.docker.internal';
 }
 
