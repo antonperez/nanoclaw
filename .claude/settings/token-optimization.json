@@ -1,0 +1,27 @@
+{
+  "project": "nanoclaw",
+  "always_load_memories": [
+    "architecture.md",
+    "codebase-conventions.md"
+  ],
+  "conditional_memories": {
+    "testing": "testing-strategy.md",
+    "channels": "architecture.md",
+    "container": "architecture.md",
+    "db": "codebase-conventions.md"
+  },
+  "model_overrides": {
+    "migrations": "haiku",
+    "simple_config_changes": "haiku",
+    "channel_implementation": "sonnet",
+    "security_review": "opus",
+    "architectural_decisions": "opus"
+  },
+  "symbol_first": true,
+  "skip_full_file_reads": [
+    "src/index.ts",
+    "src/container-runner.ts",
+    "src/db.ts"
+  ],
+  "constitution_path": ".claude/settings/constitution.json"
+}
