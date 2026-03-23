@@ -103,6 +103,19 @@ function buildVolumeMounts(
         readonly: true,
       });
     }
+
+    // Project-level Claude rules (hybrid routing, global instructions) for non-main groups.
+    // Main groups already have the full project root at /workspace/project.
+    // Mounted at /workspace/extra/nanoclaw so agent-runner picks it up via
+    // additionalDirectories and Claude Code auto-loads the CLAUDE.md.
+    const projectClaudeDir = path.join(projectRoot, '.claude');
+    if (fs.existsSync(projectClaudeDir)) {
+      mounts.push({
+        hostPath: projectClaudeDir,
+        containerPath: '/workspace/extra/nanoclaw',
+        readonly: true,
+      });
+    }
   }
 
   // Per-group Claude sessions directory (isolated from other groups)

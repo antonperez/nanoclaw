@@ -58,6 +58,8 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { routeMessage } from './model-router.js';
+import { runOllamaAgent } from './ollama-runner.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -190,12 +192,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
+  // Route to Ollama (local) or Claude based on message content.
+  // Force-local keywords override; tool/complexity patterns use Claude; default is Ollama.
+  const lastUserMsg =
+    [...missedMessages].reverse().find((m) => !m.is_from_me) ??
+    missedMessages[missedMessages.length - 1];
+  const routingDecision = routeMessage(lastUserMsg.content);
+
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: missedMessages.length, model: routingDecision.model, reason: routingDecision.reason },
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
+  // Track idle timer for closing stdin when Claude agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const resetIdleTimer = () => {
@@ -213,37 +222,53 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
+  if (routingDecision.model === 'ollama') {
+    // Fast local path — direct Ollama call, no container overhead
+    const result = await runOllamaAgent(
+      missedMessages,
+      ASSISTANT_NAME,
+      resolveGroupFolderPath(group.folder),
+      async (text) => {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+      },
+    );
+    if (result === 'error') hadError = true;
+  } else {
+    // Full Claude agent path — spawns isolated container
+    const output = await runAgent(group, prompt, chatJid, async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    });
+    if (output === 'error') hadError = true;
+  }
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
