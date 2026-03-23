@@ -32,7 +32,7 @@ store/         - WhatsApp credential store (if installed)
 | `src/channels/telegram.ts` | Telegram channel + bot pool for swarm workers |
 | `src/container-runner.ts` | Spawns agent containers, handles streaming output |
 | `src/container-runtime.ts` | Detects Docker vs Apple Container, manages container lifecycle |
-| `src/ipc.ts` | IPC watcher for agent-to-host commands (register group, send message, schedule task) |
+| `src/ipc.ts` | IPC watcher for agent-to-host commands (register group, send message, schedule task, send email) |
 | `src/router.ts` | Message formatting (inbound XML context, outbound text) + channel routing |
 | `src/db.ts` | All SQLite operations (messages, groups, sessions, tasks, chats) |
 | `src/task-scheduler.ts` | Runs scheduled tasks (cron/interval/once) |
@@ -42,6 +42,11 @@ store/         - WhatsApp credential store (if installed)
 | `src/credential-proxy.ts` | Secure API key proxy — containers never hold secrets directly |
 | `src/remote-control.ts` | Remote control sessions for main group |
 | `src/config.ts` | All env-driven configuration constants |
+| `src/env.ts` | Environment variable loading/validation |
+| `src/logger.ts` | Pino logger setup |
+| `src/timezone.ts` | Timezone utilities |
+| `src/types.ts` | Shared TypeScript types |
+| `src/group-folder.ts` | Group filesystem path helpers |
 
 ## Channel System
 Channels self-register via barrel import (`src/channels/index.ts`). Each channel file calls `registerChannel(name, factory)` at module load time. Factory returns `null` when credentials are missing — the channel is skipped silently.
@@ -51,6 +56,29 @@ Channels self-register via barrel import (`src/channels/index.ts`). Each channel
 - Containers mount: group folder (read-write), data/sessions (read-write), credential proxy socket
 - Additional mounts controlled by `~/.config/nanoclaw/mount-allowlist.json` (outside project, never mounted into containers)
 - Container image: `nanoclaw-agent:latest` (built via `./container/build.sh`)
+
+## Container Agent Runner
+- Entry point: `container/agent-runner/src/index.ts`
+- IPC MCP bridge: `container/agent-runner/src/ipc-mcp-stdio.ts` — exposes host IPC commands as MCP tools to the agent (e.g. `mcp__nanoclaw__send_email`)
+
+## Container Skills (loaded inside agent containers at runtime)
+| Skill | Purpose |
+|-------|---------|
+| `container/skills/agent-browser/` | Browser automation for agents |
+| `container/skills/slack-formatting/` | Slack message formatting helpers |
+| `container/skills/capabilities/` | Lists agent capabilities (updated when features added) |
+| `container/skills/status/` | Status reporting (updated when features added) |
+
+## IPC Commands (Agent → Host)
+Agents write JSON commands to `/workspace/ipc/` inside the container. Host polls via `src/ipc.ts`.
+
+| Command | Handler |
+|---------|---------|
+| `register-group` | Register a new chat group |
+| `send-message` | Send a message via a channel |
+| `schedule-task` | Schedule a cron/interval/once task |
+| `cancel-task` | Cancel a scheduled task |
+| `send_email` | Send email via iCloud SMTP (nodemailer, smtp.mail.me.com:587) |
 
 ## Security Model
 - Containers run as unprivileged user
@@ -63,3 +91,6 @@ Channels self-register via barrel import (`src/channels/index.ts`). Each channel
 - SQLite at `data/nanoclaw.db`: messages, chats, groups, sessions, tasks, router state
 - Per-group CLAUDE.md at `groups/{name}/CLAUDE.md`: agent memory
 - Agent session IDs persisted in DB for conversation continuity
+
+## Last Updated
+2026-03-23
