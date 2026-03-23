@@ -200,7 +200,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const routingDecision = routeMessage(lastUserMsg.content);
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length, model: routingDecision.model, reason: routingDecision.reason },
+    {
+      group: group.name,
+      messageCount: missedMessages.length,
+      model: routingDecision.model,
+      reason: routingDecision.reason,
+    },
     'Processing messages',
   );
 
