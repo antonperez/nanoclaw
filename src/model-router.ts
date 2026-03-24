@@ -5,6 +5,12 @@ export interface RoutingDecision {
   reason: string;
 }
 
+// Keywords that always force Claude (container agent)
+const FORCE_CLAUDE: RegExp[] = [
+  /\bclaude\b/i,
+  /\bandy\b/i,
+];
+
 // Keywords that always force local Ollama model
 const FORCE_LOCAL: RegExp[] = [
   /\bvault\b/i,
@@ -53,6 +59,12 @@ const COMPLEXITY_WORD_THRESHOLD = 100;
  *  4. Default → Ollama
  */
 export function routeMessage(lastUserMessage: string): RoutingDecision {
+  for (const pattern of FORCE_CLAUDE) {
+    if (pattern.test(lastUserMessage)) {
+      return { model: 'claude', reason: 'force-claude keyword' };
+    }
+  }
+
   for (const pattern of FORCE_LOCAL) {
     if (pattern.test(lastUserMessage)) {
       return { model: 'ollama', reason: 'force-local keyword' };
