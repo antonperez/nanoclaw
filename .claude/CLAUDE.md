@@ -22,6 +22,15 @@ Route to Claude Pro (container agent) when the message requires:
 - Deep work: code writing, debugging, analysis, refactoring
 - Long agents or orchestration tasks
 
+## Force-Claude Triggers (keywords in user message)
+
+Any of the following words/phrases force the Claude Pro path, overriding all other signals:
+
+| Trigger | Example |
+|---------|---------|
+| `claude` | "claude, write me a script" |
+| `andy` | "andy, help me debug this" |
+
 ## Force-Local Triggers (keywords in user message)
 
 Any of the following words/phrases in a message force the Ollama path, overriding all other signals:
