@@ -21,6 +21,13 @@ Route to Claude Pro (container agent) when the message requires:
 - External knowledge or real-time data
 - Deep work: code writing, debugging, analysis, refactoring
 - Long agents or orchestration tasks
+- Scheduled tasks (`mcp__nanoclaw__schedule_task`)
+- Email drafting or sending
+- Strategy, planning, stress-testing ideas
+- Swarm / agent coordination
+- Web search or browsing
+- Cross-file reasoning ("what should I prioritize this week?")
+- Anything requiring memory across multiple files
 
 ## Force-Claude Triggers (keywords in user message)
 
@@ -35,6 +42,8 @@ Any of the following words/phrases force the Claude Pro path, overriding all oth
 
 Any of the following words/phrases in a message force the Ollama path, overriding all other signals:
 
+**Explicit keywords:**
+
 | Trigger | Example |
 |---------|---------|
 | `vault` | "vault, what's 2+2?" |
@@ -43,6 +52,18 @@ Any of the following words/phrases in a message force the Ollama path, overridin
 | `use anton-vault` | "use anton-vault for this" |
 | `use ollama` | "use ollama to answer" |
 | `use qwen` | "use qwen — quick question" |
+
+**Task-type patterns (free, fast, private — Ollama handles these automatically):**
+
+| Task type | Example |
+|-----------|---------|
+| Save / append a note | "save a note: …", "append to tasks.md" |
+| Read back a file | "what's in my tasks?", "read me the note" |
+| Simple reminders | "remind me at 3pm to call Jon", "set a reminder for 9am" |
+| Format / clean up text | "format this paragraph", "clean up my message" |
+| Math & unit conversions | "convert 5km to miles", "how many oz in a cup" |
+| Summarize inline text | "summarize this:", "summarize the following" |
+| CRM template fill-in | "fill in the CRM with these details", "CRM template: …" |
 
 ## Configuration (.env)
 
