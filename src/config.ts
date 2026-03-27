@@ -11,6 +11,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'OLLAMA_HOST',
   'OLLAMA_MODEL',
+  'RESET_COMMAND_ENABLED',
+  'RESET_DEFAULT_WINDOW',
 ]);
 
 export const ASSISTANT_NAME =
@@ -82,6 +84,16 @@ export const OLLAMA_HOST =
   process.env.OLLAMA_HOST || envConfig.OLLAMA_HOST || 'http://localhost:11434';
 export const OLLAMA_DEFAULT_MODEL =
   process.env.OLLAMA_MODEL || envConfig.OLLAMA_MODEL || 'anton-vault';
+
+// /reset command — clear Claude session and reload N messages of context
+export const RESET_COMMAND_ENABLED =
+  (process.env.RESET_COMMAND_ENABLED ||
+    envConfig.RESET_COMMAND_ENABLED ||
+    'false') === 'true';
+export const RESET_DEFAULT_WINDOW = parseInt(
+  process.env.RESET_DEFAULT_WINDOW || envConfig.RESET_DEFAULT_WINDOW || '10',
+  10,
+);
 
 export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
   .split(',')

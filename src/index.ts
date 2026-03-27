@@ -6,6 +6,8 @@ import {
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  RESET_COMMAND_ENABLED,
+  RESET_DEFAULT_WINDOW,
   TELEGRAM_BOT_POOL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -29,12 +31,14 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  clearSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getRecentMessages,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -71,6 +75,8 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+// Per-group one-shot context reload count set by /reset; cleared after first use
+const resetContextReload: Record<string, number> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -164,11 +170,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
-    chatJid,
-    sinceTimestamp,
-    ASSISTANT_NAME,
-  );
+  let missedMessages;
+  if (resetContextReload[chatJid]) {
+    const reloadCount = resetContextReload[chatJid];
+    delete resetContextReload[chatJid];
+    missedMessages = getRecentMessages(chatJid, ASSISTANT_NAME, reloadCount);
+  } else {
+    missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  }
 
   if (missedMessages.length === 0) return true;
 
@@ -567,6 +576,32 @@ async function main(): Promise<void> {
     }
   }
 
+  // Handle /reset [N] — clears Claude session and queues context reload
+  async function handleReset(
+    chatJid: string,
+    windowArg: string,
+  ): Promise<void> {
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    const count = parseInt(windowArg, 10);
+    const reloadCount =
+      Number.isFinite(count) && count > 0 ? count : RESET_DEFAULT_WINDOW;
+
+    const group = registeredGroups[chatJid];
+    if (group && sessions[group.folder]) {
+      delete sessions[group.folder];
+      clearSession(group.folder);
+    }
+
+    resetContextReload[chatJid] = reloadCount;
+
+    await channel.sendMessage(
+      chatJid,
+      `Session cleared. I'll reload the last ${reloadCount} messages as context on your next message.`,
+    );
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -576,6 +611,17 @@ async function main(): Promise<void> {
         handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'Remote control command error'),
         );
+        return;
+      }
+
+      // /reset [N] — always intercept; only act when feature flag is on
+      if (trimmed.startsWith('/reset')) {
+        if (RESET_COMMAND_ENABLED) {
+          const parts = trimmed.split(/\s+/);
+          handleReset(chatJid, parts[1] || '').catch((err) =>
+            logger.error({ err, chatJid }, 'Reset command error'),
+          );
+        }
         return;
       }
 
