@@ -195,8 +195,12 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:text', async (ctx) => {
-      // Skip commands
-      if (ctx.message.text.startsWith('/')) return;
+      // Skip commands (allow /reset through for onMessage handler)
+      if (
+        ctx.message.text.startsWith('/') &&
+        !ctx.message.text.trim().startsWith('/reset')
+      )
+        return;
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
