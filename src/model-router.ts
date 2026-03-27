@@ -6,10 +6,7 @@ export interface RoutingDecision {
 }
 
 // Keywords that always force Claude (container agent)
-const FORCE_CLAUDE: RegExp[] = [
-  /\bclaude\b/i,
-  /\bandy\b/i,
-];
+const FORCE_CLAUDE: RegExp[] = [/\bclaude\b/i, /\bandy\b/i];
 
 // Keywords that always force local Ollama model
 const FORCE_LOCAL: RegExp[] = [

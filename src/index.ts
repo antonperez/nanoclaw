@@ -577,12 +577,16 @@ async function main(): Promise<void> {
   }
 
   // Handle /reset [N] — clears Claude session and queues context reload
-  async function handleReset(chatJid: string, windowArg: string): Promise<void> {
+  async function handleReset(
+    chatJid: string,
+    windowArg: string,
+  ): Promise<void> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return;
 
     const count = parseInt(windowArg, 10);
-    const reloadCount = Number.isFinite(count) && count > 0 ? count : RESET_DEFAULT_WINDOW;
+    const reloadCount =
+      Number.isFinite(count) && count > 0 ? count : RESET_DEFAULT_WINDOW;
 
     const group = registeredGroups[chatJid];
     if (group && sessions[group.folder]) {
