@@ -9,6 +9,9 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'DEEPSEEK_API_KEY',
+  'DEEPSEEK_BASE_URL',
+  'DEEPSEEK_MODEL',
   'OLLAMA_HOST',
   'OLLAMA_MODEL',
   'RESET_COMMAND_ENABLED',
@@ -79,7 +82,17 @@ export const TRIGGER_PATTERN = new RegExp(
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-// Ollama — local model backend (default for simple/private requests)
+// DeepSeek — Anthropic-compatible external model backend
+export const DEEPSEEK_BASE_URL =
+  process.env.DEEPSEEK_BASE_URL ||
+  envConfig.DEEPSEEK_BASE_URL ||
+  'https://api.deepseek.com/anthropic';
+export const DEEPSEEK_API_KEY =
+  process.env.DEEPSEEK_API_KEY || envConfig.DEEPSEEK_API_KEY || '';
+export const DEEPSEEK_MODEL =
+  process.env.DEEPSEEK_MODEL || envConfig.DEEPSEEK_MODEL || 'deepseek-chat';
+
+// Ollama — local model backend (explicit opt-in via "vault" or "ollama" keywords)
 export const OLLAMA_HOST =
   process.env.OLLAMA_HOST || envConfig.OLLAMA_HOST || 'http://localhost:11434';
 export const OLLAMA_DEFAULT_MODEL =

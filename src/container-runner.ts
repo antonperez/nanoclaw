@@ -227,6 +227,9 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Default to Sonnet — subagents/tools can still escalate to Opus when needed
+  args.push('-e', 'CLAUDE_MODEL=sonnet');
+
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
     '-e',
