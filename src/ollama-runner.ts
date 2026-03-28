@@ -61,23 +61,6 @@ function readMdFile(groupDir: string, relativePath: string): string {
   }
 }
 
-function buildSystemPrompt(assistantName: string, groupDir: string): string {
-  const mdFiles = listMdFiles(groupDir);
-  const index =
-    mdFiles.length > 0
-      ? `\n\nAvailable memory files (use read_file to read any of them):\n${mdFiles.map((f) => `- ${f}`).join('\n')}`
-      : '';
-  // Always inject CLAUDE.md directly so rules are always visible
-  let claudeMd = '';
-  try {
-    claudeMd = fs.readFileSync(path.join(groupDir, 'CLAUDE.md'), 'utf8');
-  } catch {
-    /* no CLAUDE.md */
-  }
-  const rules = claudeMd ? `\n\n---\n# CLAUDE.md (rules)\n${claudeMd}` : '';
-  return `You are ${assistantName}, a helpful personal assistant. Be concise and direct.${rules}${index}`;
-}
-
 const READ_FILE_TOOL = {
   type: 'function',
   function: {
@@ -135,8 +118,22 @@ export async function runOllamaAgent(
 ): Promise<'success' | 'error'> {
   logger.info({ model: OLLAMA_DEFAULT_MODEL }, 'Routing to Ollama');
 
+  // Build conversation without a system message to preserve the Modelfile SYSTEM prompt.
+  // Inject memory file index as context before the conversation if files exist.
+  const mdFiles = listMdFiles(groupDir);
   const conversation: OllamaMessage[] = [
-    { role: 'system', content: buildSystemPrompt(assistantName, groupDir) },
+    ...(mdFiles.length > 0
+      ? [
+          {
+            role: 'user' as const,
+            content: `[Context] Available memory files (use read_file to access):\n${mdFiles.map((f) => `- ${f}`).join('\n')}`,
+          },
+          {
+            role: 'assistant' as const,
+            content: 'Noted. I can read these files when needed.',
+          },
+        ]
+      : []),
     ...messages.map((m) => ({
       role: (m.is_from_me ? 'assistant' : 'user') as OllamaMessage['role'],
       content: m.content,

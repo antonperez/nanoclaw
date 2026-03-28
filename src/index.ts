@@ -63,6 +63,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { routeMessage } from './model-router.js';
+import { runDeepSeekAgent } from './deepseek-runner.js';
 import { runOllamaAgent } from './ollama-runner.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -201,12 +202,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
-  // Route to Ollama (local) or Claude based on message content.
-  // Force-local keywords override; tool/complexity patterns use Claude; default is Ollama.
+  // Route to the appropriate backend based on message content.
+  // Strip the @trigger prefix so it doesn't match force-claude keywords (e.g. "Andy").
   const lastUserMsg =
     [...missedMessages].reverse().find((m) => !m.is_from_me) ??
     missedMessages[missedMessages.length - 1];
-  const routingDecision = routeMessage(lastUserMsg.content);
+  const routingInput = lastUserMsg.content.replace(TRIGGER_PATTERN, '').trim();
+  const routingDecision = routeMessage(routingInput);
 
   logger.info(
     {
@@ -236,14 +238,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  if (routingDecision.model === 'ollama') {
+  if (routingDecision.model === 'deepseek') {
+    // DeepSeek path — Anthropic-compatible external API
+    const result = await runDeepSeekAgent(
+      missedMessages,
+      ASSISTANT_NAME,
+      resolveGroupFolderPath(group.folder),
+      async (text) => {
+        await channel.sendMessage(chatJid, `[DEEPSEEK]: ${text}`);
+        outputSentToUser = true;
+      },
+    );
+    if (result === 'error') hadError = true;
+  } else if (routingDecision.model === 'ollama') {
     // Fast local path — direct Ollama call, no container overhead
     const result = await runOllamaAgent(
       missedMessages,
       ASSISTANT_NAME,
       resolveGroupFolderPath(group.folder),
       async (text) => {
-        await channel.sendMessage(chatJid, `[OLLAMA] ${text}`);
+        await channel.sendMessage(chatJid, `[OLLAMA]: ${text}`);
         outputSentToUser = true;
       },
     );
@@ -261,7 +275,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
         if (text) {
-          await channel.sendMessage(chatJid, `[CLAUDE] ${text}`);
+          await channel.sendMessage(chatJid, `[CLAUDE]: ${text}`);
           outputSentToUser = true;
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
