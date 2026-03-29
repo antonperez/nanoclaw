@@ -53,8 +53,10 @@ jobs:
             exit 0
           fi
 
-          # Merge upstream main into fork's main
-          if ! git merge upstream/main --no-edit; then
+          # Merge upstream main into fork's main.
+          # Use -X ours so fork customisations win all conflicts automatically.
+          # Build + test below still validate the result.
+          if ! git merge -X ours upstream/main --no-edit; then
             echo "::error::Failed to merge upstream/main into fork main — conflicts detected"
             git merge --abort
             echo "synced=false" >> "$GITHUB_OUTPUT"
