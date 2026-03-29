@@ -354,9 +354,11 @@ server.tool(
     to: z.string().describe('Recipient email address'),
     subject: z.string().describe('Email subject line'),
     body: z.string().describe('Email body (plain text)'),
+    cc: z.string().optional().describe('CC email address(es), comma-separated'),
+    bcc: z.string().optional().describe('BCC email address(es), comma-separated'),
   },
   async (args) => {
-    const data = {
+    const data: Record<string, string | undefined> = {
       type: 'send_email',
       to: args.to,
       subject: args.subject,
@@ -364,6 +366,8 @@ server.tool(
       groupFolder,
       timestamp: new Date().toISOString(),
     };
+    if (args.cc) data.cc = args.cc;
+    if (args.bcc) data.bcc = args.bcc;
 
     writeIpcFile(EMAILS_DIR, data);
 

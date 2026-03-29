@@ -200,11 +200,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   await transporter.sendMail({
                     from,
                     to: data.to,
+                    cc: data.cc,
+                    bcc: data.bcc,
                     subject: data.subject,
                     text: data.body,
                   });
                   logger.info(
-                    { to: data.to, subject: data.subject, sourceGroup },
+                    { to: data.to, cc: data.cc, bcc: data.bcc, subject: data.subject, sourceGroup },
                     'Email sent via iCloud SMTP',
                   );
                 }
