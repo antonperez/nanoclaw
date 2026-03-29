@@ -1,7 +1,10 @@
+import fs from 'fs';
 import https from 'https';
+import path from 'path';
+
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -38,6 +41,57 @@ async function sendTelegramMessage(
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
     await api.sendMessage(chatId, text, options);
+  }
+}
+
+/**
+ * Download a Telegram file by file_id and save it under the group's files/ directory.
+ * Returns the saved absolute path, or null on failure.
+ */
+async function downloadTelegramFile(
+  api: Api,
+  botToken: string,
+  fileId: string,
+  groupFolder: string,
+  filename: string,
+): Promise<string | null> {
+  try {
+    const fileInfo = await api.getFile(fileId);
+    if (!fileInfo.file_path) {
+      logger.warn({ fileId }, 'Telegram file has no file_path');
+      return null;
+    }
+
+    const dir = path.join(GROUPS_DIR, groupFolder, 'files');
+    fs.mkdirSync(dir, { recursive: true });
+
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:T]/g, '')
+      .slice(0, 15); // YYYYMMDDHHmmss + fraction → trim to 14 chars + 1 digit
+    const safeTimestamp = timestamp.replace(/\..+$/, ''); // drop ms
+    const destPath = path.join(dir, `${safeTimestamp}-${filename}`);
+
+    await new Promise<void>((resolve, reject) => {
+      const url = `https://api.telegram.org/file/bot${botToken}/${fileInfo.file_path}`;
+      const file = fs.createWriteStream(destPath);
+      https
+        .get(url, (res) => {
+          res.pipe(file);
+          file.on('finish', () => file.close(() => resolve()));
+          file.on('error', reject);
+        })
+        .on('error', (err) => {
+          fs.unlink(destPath, () => {});
+          reject(err);
+        });
+    });
+
+    logger.info({ destPath, fileId }, 'Telegram file saved');
+    return destPath;
+  } catch (err) {
+    logger.error({ err, fileId }, 'Failed to download Telegram file');
+    return null;
   }
 }
 
@@ -277,8 +331,13 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    // Handle non-text messages: download files to group's files/ dir, store message with path
+    const handleMediaMessage = async (
+      ctx: any,
+      fileId: string | null,
+      filename: string,
+      placeholder: string,
+    ) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -300,31 +359,92 @@ export class TelegramChannel implements Channel {
         'telegram',
         isGroup,
       );
+
+      let content = `${placeholder}${caption}`;
+
+      if (fileId && this.bot) {
+        const savedPath = await downloadTelegramFile(
+          this.bot.api,
+          this.botToken,
+          fileId,
+          group.folder,
+          filename,
+        );
+        if (savedPath) {
+          content = `${placeholder} → saved to ${savedPath}${caption}`;
+          // Confirm to sender
+          try {
+            await ctx.reply(`Saved: \`${savedPath}\``, {
+              parse_mode: 'Markdown',
+            });
+          } catch (err) {
+            logger.debug({ err }, 'Failed to send file-save confirmation');
+          }
+        }
+      }
+
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
         sender: ctx.from?.id?.toString() || '',
         sender_name: senderName,
-        content: `${placeholder}${caption}`,
+        content,
         timestamp,
         is_from_me: false,
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
-    this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
+    this.bot.on('message:photo', (ctx) => {
+      // Photos come as array of sizes — take the largest (last)
+      const photos = ctx.message.photo || [];
+      const largest = photos[photos.length - 1];
+      const fileId = largest?.file_id || null;
+      const uniqueId = largest?.file_unique_id || Date.now().toString();
+      handleMediaMessage(ctx, fileId, `photo-${uniqueId}.jpg`, '[Photo]');
+    });
+    this.bot.on('message:video', (ctx) => {
+      const video = ctx.message.video;
+      const filename =
+        video?.file_name || `video-${video?.file_unique_id || Date.now()}.mp4`;
+      handleMediaMessage(ctx, video?.file_id || null, filename, '[Video]');
+    });
+    this.bot.on('message:voice', (ctx) => {
+      const voice = ctx.message.voice;
+      handleMediaMessage(
+        ctx,
+        voice?.file_id || null,
+        `voice-${voice?.file_unique_id || Date.now()}.ogg`,
+        '[Voice message]',
+      );
+    });
+    this.bot.on('message:audio', (ctx) => {
+      const audio = ctx.message.audio;
+      const filename =
+        audio?.file_name || `audio-${audio?.file_unique_id || Date.now()}.mp3`;
+      handleMediaMessage(ctx, audio?.file_id || null, filename, '[Audio]');
+    });
     this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+      const doc = ctx.message.document;
+      const displayName = doc?.file_name || 'file';
+      const filename =
+        doc?.file_name || `file-${doc?.file_unique_id || Date.now()}`;
+      handleMediaMessage(
+        ctx,
+        doc?.file_id || null,
+        filename,
+        `[Document: ${displayName}]`,
+      );
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
-      storeNonText(ctx, `[Sticker ${emoji}]`);
+      handleMediaMessage(ctx, null, '', `[Sticker ${emoji}]`);
     });
-    this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
-    this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
+    this.bot.on('message:location', (ctx) =>
+      handleMediaMessage(ctx, null, '', '[Location]'),
+    );
+    this.bot.on('message:contact', (ctx) =>
+      handleMediaMessage(ctx, null, '', '[Contact]'),
+    );
 
     // Handle errors gracefully
     this.bot.catch((err) => {
