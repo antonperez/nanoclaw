@@ -44,8 +44,22 @@ async function sendTelegramMessage(
   }
 }
 
+/** Derive a short type prefix from a filename extension. */
+function fileTypePrefix(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (
+    ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'].includes(ext)
+  )
+    return 'img';
+  if (['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(ext)) return 'vid';
+  if (['.mp3', '.m4a', '.ogg', '.wav', '.aac', '.flac'].includes(ext))
+    return 'aud';
+  return 'doc';
+}
+
 /**
  * Download a Telegram file by file_id and save it under the group's files/ directory.
+ * Filename format: {type}-{YYYYMMDDHHmmss}-{original_name}
  * Returns the saved absolute path, or null on failure.
  */
 async function downloadTelegramFile(
@@ -65,12 +79,10 @@ async function downloadTelegramFile(
     const dir = path.join(GROUPS_DIR, groupFolder, 'files');
     fs.mkdirSync(dir, { recursive: true });
 
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[-:T]/g, '')
-      .slice(0, 15); // YYYYMMDDHHmmss + fraction → trim to 14 chars + 1 digit
-    const safeTimestamp = timestamp.replace(/\..+$/, ''); // drop ms
-    const destPath = path.join(dir, `${safeTimestamp}-${filename}`);
+    // YYYYMMDDHHmmss — strip all non-digits, take first 14
+    const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+    const prefix = fileTypePrefix(filename);
+    const destPath = path.join(dir, `${prefix}-${timestamp}-${filename}`);
 
     await new Promise<void>((resolve, reject) => {
       const url = `https://api.telegram.org/file/bot${botToken}/${fileInfo.file_path}`;
