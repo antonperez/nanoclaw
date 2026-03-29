@@ -63,6 +63,10 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,
 );
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
@@ -74,9 +78,18 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function buildTriggerPattern(trigger: string): RegExp {
-  return new RegExp(`^${escapeRegex(trigger.trim())}\\b`, 'i');
+export const DEFAULT_TRIGGER = process.env.TRIGGER || envConfig.TRIGGER || '@Andy';
+
+export function buildTriggerPattern(trigger: string | undefined): RegExp {
+  const t = trigger ?? DEFAULT_TRIGGER;
+  return new RegExp(`^${escapeRegex(t.trim())}\\b`, 'i');
 }
+
+/** Alias used by upstream — keeps compatibility after rename. */
+export const getTriggerPattern = buildTriggerPattern;
+
+/** Default trigger regex built from DEFAULT_TRIGGER — for callers that don't have a per-group trigger. */
+export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
