@@ -9,6 +9,7 @@ import {
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getRecentMessages,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
@@ -568,5 +569,75 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+describe('getRecentMessages', () => {
+  const JID = 'chat@g.us';
+
+  function msg(
+    id: string,
+    content: string,
+    timestamp: string,
+    is_from_me = false,
+    is_bot_message = false,
+  ) {
+    storeMessage({
+      id,
+      chat_jid: JID,
+      sender: is_from_me ? 'me' : 'user1',
+      sender_name: is_from_me ? 'Andy' : 'User',
+      content,
+      timestamp,
+      is_from_me,
+      is_bot_message,
+    });
+  }
+
+  beforeEach(() => {
+    _initTestDatabase();
+    storeChatMetadata(JID, '2024-01-01T00:00:00.000Z');
+    msg('m1', 'first user message',   '2024-01-01T00:00:01.000Z');
+    msg('m2', 'second user message',  '2024-01-01T00:00:02.000Z');
+    msg('m3', 'Andy: here is my reply', '2024-01-01T00:00:03.000Z', true, true);
+    msg('m4', 'third user message',   '2024-01-01T00:00:04.000Z');
+    msg('m5', '/reset 5',             '2024-01-01T00:00:05.000Z');
+    msg('m6', '',                     '2024-01-01T00:00:06.000Z');
+  });
+
+  it('excludes bot messages and empty content', () => {
+    const contents = getRecentMessages(JID, 'Andy', 10).map((m) => m.content);
+    expect(contents).not.toContain('Andy: here is my reply');
+    expect(contents).not.toContain('');
+    expect(contents).toContain('first user message');
+    expect(contents).toContain('second user message');
+    expect(contents).toContain('third user message');
+  });
+
+  it('returns messages in chronological order (oldest first)', () => {
+    const msgs = getRecentMessages(JID, 'Andy', 10);
+    for (let i = 1; i < msgs.length; i++) {
+      expect(msgs[i].timestamp >= msgs[i - 1].timestamp).toBe(true);
+    }
+  });
+
+  it('respects the limit parameter', () => {
+    expect(getRecentMessages(JID, 'Andy', 2)).toHaveLength(2);
+  });
+
+  it('returns the most recent N messages when limit < total', () => {
+    // Eligible: m1, m2, m4, m5 (4 msgs). limit=1 → most recent = m5
+    const msgs = getRecentMessages(JID, 'Andy', 1);
+    expect(msgs[0].id).toBe('m5');
+  });
+
+  it('returns empty array when no messages exist for that chat', () => {
+    expect(getRecentMessages('unknown@g.us', 'Andy', 10)).toHaveLength(0);
+  });
+
+  it('excludes messages prefixed with bot name even without is_bot_message flag', () => {
+    msg('m7', 'Andy: another reply', '2024-01-01T00:00:07.000Z', false, false);
+    const contents = getRecentMessages(JID, 'Andy', 10).map((m) => m.content);
+    expect(contents).not.toContain('Andy: another reply');
   });
 });

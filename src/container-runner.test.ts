@@ -42,6 +42,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -99,6 +100,8 @@ vi.mock('child_process', async () => {
     ),
   };
 });
+
+import fs from 'fs';
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
@@ -220,5 +223,73 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('agent-runner source sync', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.cpSync).mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('copies agent-runner src when source exists', async () => {
+    // existsSync: true for agentRunnerSrc, false for everything else
+    vi.mocked(fs.existsSync).mockImplementation((p) =>
+      String(p).includes('container/agent-runner/src'),
+    );
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      expect.stringContaining('container/agent-runner/src'),
+      expect.stringContaining('agent-runner-src'),
+      { recursive: true, force: true },
+    );
+  });
+
+  it('skips copy when agent-runner src does not exist', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(fs.cpSync).not.toHaveBeenCalledWith(
+      expect.stringContaining('agent-runner-src'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('always syncs even when destination already exists', async () => {
+    // Both src and dst exist — should still copy (force: true)
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      expect.stringContaining('container/agent-runner/src'),
+      expect.stringContaining('agent-runner-src'),
+      expect.objectContaining({ force: true }),
+    );
   });
 });

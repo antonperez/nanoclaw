@@ -45,7 +45,7 @@ async function sendTelegramMessage(
 }
 
 /** Derive a short type prefix from a filename extension. */
-function fileTypePrefix(filename: string): string {
+export function fileTypePrefix(filename: string): string {
   const ext = path.extname(filename).toLowerCase();
   if (
     ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'].includes(ext)

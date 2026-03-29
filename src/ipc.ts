@@ -30,6 +30,11 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+/** Reset singleton for tests. */
+export function _resetIpcWatcher(): void {
+  ipcWatcherRunning = false;
+}
+
 function createEmailTransporter() {
   const env = readEnvFile(['ICLOUD_EMAIL', 'ICLOUD_APP_PASSWORD']);
   const user = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
