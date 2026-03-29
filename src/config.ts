@@ -14,7 +14,6 @@ const envConfig = readEnvFile([
   'DEEPSEEK_MODEL',
   'OLLAMA_HOST',
   'OLLAMA_MODEL',
-  'RESET_COMMAND_ENABLED',
   'RESET_DEFAULT_WINDOW',
 ]);
 
@@ -99,10 +98,6 @@ export const OLLAMA_DEFAULT_MODEL =
   process.env.OLLAMA_MODEL || envConfig.OLLAMA_MODEL || 'anton-vault';
 
 // /reset command — clear Claude session and reload N messages of context
-export const RESET_COMMAND_ENABLED =
-  (process.env.RESET_COMMAND_ENABLED ||
-    envConfig.RESET_COMMAND_ENABLED ||
-    'false') === 'true';
 export const RESET_DEFAULT_WINDOW = parseInt(
   process.env.RESET_DEFAULT_WINDOW || envConfig.RESET_DEFAULT_WINDOW || '10',
   10,

@@ -6,7 +6,6 @@ import {
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
-  RESET_COMMAND_ENABLED,
   RESET_DEFAULT_WINDOW,
   TELEGRAM_BOT_POOL,
   TIMEZONE,
@@ -603,7 +602,7 @@ async function main(): Promise<void> {
       Number.isFinite(count) && count > 0 ? count : RESET_DEFAULT_WINDOW;
 
     const group = registeredGroups[chatJid];
-    if (group && sessions[group.folder]) {
+    if (group) {
       delete sessions[group.folder];
       clearSession(group.folder);
     }
@@ -628,14 +627,12 @@ async function main(): Promise<void> {
         return;
       }
 
-      // /reset [N] — always intercept; only act when feature flag is on
+      // /reset [N] — clear Claude session and reload N messages of context
       if (trimmed.startsWith('/reset')) {
-        if (RESET_COMMAND_ENABLED) {
-          const parts = trimmed.split(/\s+/);
-          handleReset(chatJid, parts[1] || '').catch((err) =>
-            logger.error({ err, chatJid }, 'Reset command error'),
-          );
-        }
+        const parts = trimmed.split(/\s+/);
+        handleReset(chatJid, parts[1] || '').catch((err) =>
+          logger.error({ err, chatJid }, 'Reset command error'),
+        );
         return;
       }
 
