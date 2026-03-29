@@ -50,8 +50,8 @@ jobs:
             # Checkout the skill branch
             git checkout -B "$BRANCH" "origin/$BRANCH"
 
-            # Attempt merge
-            if ! git merge main --no-edit; then
+            # Attempt merge (-X theirs propagates main's changes into skill branches)
+            if ! git merge main --no-edit -X theirs; then
               echo "::warning::Merge conflict in $BRANCH"
               git merge --abort
               FAILED="$FAILED $SKILL_NAME"

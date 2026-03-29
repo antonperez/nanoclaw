@@ -206,7 +206,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     text: data.body,
                   });
                   logger.info(
-                    { to: data.to, cc: data.cc, bcc: data.bcc, subject: data.subject, sourceGroup },
+                    {
+                      to: data.to,
+                      cc: data.cc,
+                      bcc: data.bcc,
+                      subject: data.subject,
+                      sourceGroup,
+                    },
                     'Email sent via iCloud SMTP',
                   );
                 }
