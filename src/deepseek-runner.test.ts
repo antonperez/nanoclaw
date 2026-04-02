@@ -56,14 +56,24 @@ describe('runDeepSeekAgent — success path', () => {
 
   it('sends x-api-key header with the configured key', async () => {
     mockFetch.mockResolvedValueOnce(deepseekOk('ok'));
-    await runDeepSeekAgent([makeMsg('hi')], 'Andy', '/tmp', vi.fn(async () => {}));
+    await runDeepSeekAgent(
+      [makeMsg('hi')],
+      'Andy',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     const headers = mockFetch.mock.calls[0][1].headers;
     expect(headers['x-api-key']).toBe('test-api-key');
   });
 
   it('sends anthropic-version header', async () => {
     mockFetch.mockResolvedValueOnce(deepseekOk('ok'));
-    await runDeepSeekAgent([makeMsg('hi')], 'Andy', '/tmp', vi.fn(async () => {}));
+    await runDeepSeekAgent(
+      [makeMsg('hi')],
+      'Andy',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     const headers = mockFetch.mock.calls[0][1].headers;
     expect(headers['anthropic-version']).toBe('2023-06-01');
   });
@@ -136,7 +146,12 @@ describe('runDeepSeekAgent — success path', () => {
 
   it('includes assistant name in system prompt', async () => {
     mockFetch.mockResolvedValueOnce(deepseekOk('ok'));
-    await runDeepSeekAgent([makeMsg('hi')], 'Claw', '/tmp', vi.fn(async () => {}));
+    await runDeepSeekAgent(
+      [makeMsg('hi')],
+      'Claw',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.system).toContain('Claw');
   });
@@ -151,7 +166,12 @@ describe('runDeepSeekAgent — error handling', () => {
       DEEPSEEK_MODEL: 'deepseek-chat',
     }));
     const { runDeepSeekAgent: run } = await import('./deepseek-runner.js');
-    const result = await run([makeMsg('hi')], 'Andy', '/tmp', vi.fn(async () => {}));
+    const result = await run(
+      [makeMsg('hi')],
+      'Andy',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
     vi.resetModules();
   });
@@ -162,13 +182,23 @@ describe('runDeepSeekAgent — error handling', () => {
       status: 429,
       text: async () => 'Rate limit exceeded',
     });
-    const result = await runDeepSeekAgent([makeMsg('hi')], 'Andy', '/tmp', vi.fn(async () => {}));
+    const result = await runDeepSeekAgent(
+      [makeMsg('hi')],
+      'Andy',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
   });
 
   it('returns error on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network error'));
-    const result = await runDeepSeekAgent([makeMsg('hi')], 'Andy', '/tmp', vi.fn(async () => {}));
+    const result = await runDeepSeekAgent(
+      [makeMsg('hi')],
+      'Andy',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
   });
 
@@ -180,7 +210,12 @@ describe('runDeepSeekAgent — error handling', () => {
         error: { message: 'Invalid request' },
       }),
     });
-    const result = await runDeepSeekAgent([makeMsg('hi')], 'Andy', '/tmp', vi.fn(async () => {}));
+    const result = await runDeepSeekAgent(
+      [makeMsg('hi')],
+      'Andy',
+      '/tmp',
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
   });
 });

@@ -16,6 +16,7 @@ const envConfig = readEnvFile([
   'OLLAMA_HOST',
   'OLLAMA_MODEL',
   'RESET_DEFAULT_WINDOW',
+  'TZ',
 ]);
 
 export const ASSISTANT_NAME =
@@ -78,7 +79,8 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export const DEFAULT_TRIGGER = process.env.TRIGGER || envConfig.TRIGGER || '@Andy';
+export const DEFAULT_TRIGGER =
+  process.env.TRIGGER || envConfig.TRIGGER || '@Andy';
 
 export function buildTriggerPattern(trigger: string | undefined): RegExp {
   const t = trigger ?? DEFAULT_TRIGGER;
@@ -91,10 +93,20 @@ export const getTriggerPattern = buildTriggerPattern;
 /** Default trigger regex built from DEFAULT_TRIGGER — for callers that don't have a per-group trigger. */
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
 
-// Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
-export const TIMEZONE =
-  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+// Timezone for scheduled tasks, message formatting, etc.
+// Validates each candidate is a real IANA identifier before accepting.
+function resolveConfigTimezone(): string {
+  const candidates = [
+    process.env.TZ,
+    envConfig.TZ,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+  ];
+  for (const tz of candidates) {
+    if (tz && isValidTimezone(tz)) return tz;
+  }
+  return 'UTC';
+}
+export const TIMEZONE = resolveConfigTimezone();
 
 // DeepSeek — Anthropic-compatible external model backend
 export const DEEPSEEK_BASE_URL =

@@ -197,6 +197,59 @@ describe('container-runner timeout behavior', () => {
     expect(onOutput).not.toHaveBeenCalled();
   });
 
+  it('resolves as success even when onOutput throws during idle cleanup', async () => {
+    const onOutput = vi.fn(async () => {
+      throw new Error('callback exploded');
+    });
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Here is my response',
+      newSessionId: 'session-throw',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(1830000);
+    fakeProc.emit('close', 137);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(result.newSessionId).toBe('session-throw');
+  });
+
+  it('resolves as success even when onOutput throws during normal completion', async () => {
+    const onOutput = vi.fn(async () => {
+      throw new Error('callback exploded');
+    });
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Done',
+      newSessionId: 'session-throw-normal',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(result.newSessionId).toBe('session-throw-normal');
+  });
+
   it('normal exit after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
@@ -244,7 +297,12 @@ describe('agent-runner source sync', () => {
       String(p).includes('container/agent-runner/src'),
     );
 
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -261,7 +319,12 @@ describe('agent-runner source sync', () => {
   it('skips copy when agent-runner src does not exist', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -279,7 +342,12 @@ describe('agent-runner source sync', () => {
     // Both src and dst exist — should still copy (force: true)
     vi.mocked(fs.existsSync).mockReturnValue(true);
 
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);

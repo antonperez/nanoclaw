@@ -90,23 +90,46 @@ describe('runOllamaAgent — basic response', () => {
   });
 
   it('returns error when Ollama HTTP request fails', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Internal Error' });
-    const result = await runOllamaAgent([makeMsg('hello')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => 'Internal Error',
+    });
+    const result = await runOllamaAgent(
+      [makeMsg('hello')],
+      'Andy',
+      GROUP_DIR,
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
   });
 
   it('returns error when fetch throws (network failure)', async () => {
     mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
-    const result = await runOllamaAgent([makeMsg('hello')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+    const result = await runOllamaAgent(
+      [makeMsg('hello')],
+      'Andy',
+      GROUP_DIR,
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
   });
 
   it('returns error when Ollama response contains error field', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ message: { role: 'assistant', content: '' }, done: true, error: 'model not found' }),
+      json: async () => ({
+        message: { role: 'assistant', content: '' },
+        done: true,
+        error: 'model not found',
+      }),
     });
-    const result = await runOllamaAgent([makeMsg('hello')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+    const result = await runOllamaAgent(
+      [makeMsg('hello')],
+      'Andy',
+      GROUP_DIR,
+      vi.fn(async () => {}),
+    );
     expect(result).toBe('error');
   });
 
@@ -159,26 +182,44 @@ describe('runOllamaAgent — read_file tool', () => {
 
   it('rejects path traversal attempts', async () => {
     mockFetch
-      .mockResolvedValueOnce(ollamaToolCall('read_file', { path: '../../etc/passwd.md' }))
+      .mockResolvedValueOnce(
+        ollamaToolCall('read_file', { path: '../../etc/passwd.md' }),
+      )
       .mockResolvedValueOnce(ollamaReply('ok'));
 
-    await runOllamaAgent([makeMsg('hack')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+    await runOllamaAgent(
+      [makeMsg('hack')],
+      'Andy',
+      GROUP_DIR,
+      vi.fn(async () => {}),
+    );
 
     // The tool result pushed into conversation should contain the error
     const secondCall = JSON.parse(mockFetch.mock.calls[1][1].body);
-    const toolMsg = secondCall.messages.find((m: { role: string }) => m.role === 'tool');
+    const toolMsg = secondCall.messages.find(
+      (m: { role: string }) => m.role === 'tool',
+    );
     expect(toolMsg.content).toMatch(/path traversal not allowed/);
   });
 
   it('rejects non-.md file reads', async () => {
     mockFetch
-      .mockResolvedValueOnce(ollamaToolCall('read_file', { path: 'secrets.env' }))
+      .mockResolvedValueOnce(
+        ollamaToolCall('read_file', { path: 'secrets.env' }),
+      )
       .mockResolvedValueOnce(ollamaReply('ok'));
 
-    await runOllamaAgent([makeMsg('read env')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+    await runOllamaAgent(
+      [makeMsg('read env')],
+      'Andy',
+      GROUP_DIR,
+      vi.fn(async () => {}),
+    );
 
     const secondCall = JSON.parse(mockFetch.mock.calls[1][1].body);
-    const toolMsg = secondCall.messages.find((m: { role: string }) => m.role === 'tool');
+    const toolMsg = secondCall.messages.find(
+      (m: { role: string }) => m.role === 'tool',
+    );
     expect(toolMsg.content).toMatch(/only .md files/);
   });
 
@@ -187,23 +228,37 @@ describe('runOllamaAgent — read_file tool', () => {
       .mockResolvedValueOnce(ollamaToolCall('delete_all_files', {}))
       .mockResolvedValueOnce(ollamaReply('ok'));
 
-    await runOllamaAgent([makeMsg('do it')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+    await runOllamaAgent(
+      [makeMsg('do it')],
+      'Andy',
+      GROUP_DIR,
+      vi.fn(async () => {}),
+    );
 
     const secondCall = JSON.parse(mockFetch.mock.calls[1][1].body);
-    const toolMsg = secondCall.messages.find((m: { role: string }) => m.role === 'tool');
+    const toolMsg = secondCall.messages.find(
+      (m: { role: string }) => m.role === 'tool',
+    );
     expect(toolMsg.content).toMatch(/unknown tool/);
   });
 
   it('forces a final response after MAX_TOOL_TURNS (10) tool calls', async () => {
     // Return tool calls 10 times, then a final answer
     for (let i = 0; i < 10; i++) {
-      mockFetch.mockResolvedValueOnce(ollamaToolCall('read_file', { path: 'notes.md' }));
+      mockFetch.mockResolvedValueOnce(
+        ollamaToolCall('read_file', { path: 'notes.md' }),
+      );
     }
     mockFetch.mockResolvedValueOnce(ollamaReply('Final answer after timeout'));
     mockReadFileSync.mockReturnValue('content');
 
     const onOutput = vi.fn(async () => {});
-    const result = await runOllamaAgent([makeMsg('loop')], 'Andy', GROUP_DIR, onOutput);
+    const result = await runOllamaAgent(
+      [makeMsg('loop')],
+      'Andy',
+      GROUP_DIR,
+      onOutput,
+    );
     expect(result).toBe('success');
     // tools=false on the final call (no tools passed)
     const lastCall = JSON.parse(
@@ -220,19 +275,40 @@ describe('runOllamaAgent — memory file context injection', () => {
     mockReaddirSync.mockImplementation((dir: unknown, opts: unknown) => {
       if (String(dir) === GROUP_DIR) {
         return [
-          Object.assign('CLAUDE.md', { isDirectory: () => false, isFile: () => true, name: 'CLAUDE.md' }),
-          Object.assign('notes.md', { isDirectory: () => false, isFile: () => true, name: 'notes.md' }),
+          Object.assign('CLAUDE.md', {
+            isDirectory: () => false,
+            isFile: () => true,
+            name: 'CLAUDE.md',
+          }),
+          Object.assign('notes.md', {
+            isDirectory: () => false,
+            isFile: () => true,
+            name: 'notes.md',
+          }),
         ];
       }
       return [];
     });
 
     const body = await new Promise<ReturnType<typeof JSON.parse>>((resolve) => {
-      mockFetch.mockImplementationOnce(async (_url: string, opts: RequestInit) => {
-        resolve(JSON.parse(opts.body as string));
-        return { ok: true, json: async () => ({ message: { role: 'assistant', content: 'ok' }, done: true }) };
-      });
-      runOllamaAgent([makeMsg('hello')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+      mockFetch.mockImplementationOnce(
+        async (_url: string, opts: RequestInit) => {
+          resolve(JSON.parse(opts.body as string));
+          return {
+            ok: true,
+            json: async () => ({
+              message: { role: 'assistant', content: 'ok' },
+              done: true,
+            }),
+          };
+        },
+      );
+      runOllamaAgent(
+        [makeMsg('hello')],
+        'Andy',
+        GROUP_DIR,
+        vi.fn(async () => {}),
+      );
     });
 
     const firstMsg = body.messages[0];
@@ -245,11 +321,24 @@ describe('runOllamaAgent — memory file context injection', () => {
     mockReaddirSync.mockReturnValue([]);
 
     const body = await new Promise<ReturnType<typeof JSON.parse>>((resolve) => {
-      mockFetch.mockImplementationOnce(async (_url: string, opts: RequestInit) => {
-        resolve(JSON.parse(opts.body as string));
-        return { ok: true, json: async () => ({ message: { role: 'assistant', content: 'ok' }, done: true }) };
-      });
-      runOllamaAgent([makeMsg('hello')], 'Andy', GROUP_DIR, vi.fn(async () => {}));
+      mockFetch.mockImplementationOnce(
+        async (_url: string, opts: RequestInit) => {
+          resolve(JSON.parse(opts.body as string));
+          return {
+            ok: true,
+            json: async () => ({
+              message: { role: 'assistant', content: 'ok' },
+              done: true,
+            }),
+          };
+        },
+      );
+      runOllamaAgent(
+        [makeMsg('hello')],
+        'Andy',
+        GROUP_DIR,
+        vi.fn(async () => {}),
+      );
     });
 
     const firstMsg = body.messages[0];

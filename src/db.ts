@@ -561,7 +561,7 @@ export function setSession(groupFolder: string, sessionId: string): void {
   ).run(groupFolder, sessionId);
 }
 
-export function clearSession(groupFolder: string): void {
+export function deleteSession(groupFolder: string): void {
   db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
 }
 

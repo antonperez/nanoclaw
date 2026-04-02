@@ -298,7 +298,11 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = await buildContainerArgs(mounts, containerName, input.isMain);
+  const containerArgs = await buildContainerArgs(
+    mounts,
+    containerName,
+    input.isMain,
+  );
 
   logger.debug(
     {
@@ -387,7 +391,14 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain
+              .then(() => onOutput(parsed))
+              .catch((err) => {
+                logger.warn(
+                  { group: group.name, err },
+                  'Output callback error',
+                );
+              });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },

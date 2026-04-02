@@ -597,12 +597,12 @@ describe('getRecentMessages', () => {
   beforeEach(() => {
     _initTestDatabase();
     storeChatMetadata(JID, '2024-01-01T00:00:00.000Z');
-    msg('m1', 'first user message',   '2024-01-01T00:00:01.000Z');
-    msg('m2', 'second user message',  '2024-01-01T00:00:02.000Z');
+    msg('m1', 'first user message', '2024-01-01T00:00:01.000Z');
+    msg('m2', 'second user message', '2024-01-01T00:00:02.000Z');
     msg('m3', 'Andy: here is my reply', '2024-01-01T00:00:03.000Z', true, true);
-    msg('m4', 'third user message',   '2024-01-01T00:00:04.000Z');
-    msg('m5', '/reset 5',             '2024-01-01T00:00:05.000Z');
-    msg('m6', '',                     '2024-01-01T00:00:06.000Z');
+    msg('m4', 'third user message', '2024-01-01T00:00:04.000Z');
+    msg('m5', '/reset 5', '2024-01-01T00:00:05.000Z');
+    msg('m6', '', '2024-01-01T00:00:06.000Z');
   });
 
   it('excludes bot messages and empty content', () => {
