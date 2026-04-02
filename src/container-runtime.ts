@@ -136,18 +136,32 @@ export function ensureContainerRuntimeRunning(): void {
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
-    const output = execSync(`${CONTAINER_RUNTIME_BIN} ls --format json`, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const containers: { status: string; configuration: { id: string } }[] =
-      JSON.parse(output || '[]');
-    const orphans = containers
-      .filter(
-        (c) =>
-          c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'),
-      )
-      .map((c) => c.configuration.id);
+    let orphans: string[];
+
+    if (os.platform() === 'darwin') {
+      // Apple Container: `container ls --format json` returns an array of objects
+      const output = execSync(`${CONTAINER_RUNTIME_BIN} ls --format json`, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+      });
+      const containers: { status: string; configuration: { id: string } }[] =
+        JSON.parse(output || '[]');
+      orphans = containers
+        .filter(
+          (c) =>
+            c.status === 'running' &&
+            c.configuration.id.startsWith('nanoclaw-'),
+        )
+        .map((c) => c.configuration.id);
+    } else {
+      // Docker (Linux/WSL): use `ps` with a name filter, get names only
+      const output = execSync(
+        `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
+        { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+      ).trim();
+      orphans = output ? output.split('\n').filter(Boolean) : [];
+    }
+
     for (const name of orphans) {
       try {
         stopContainer(name);
