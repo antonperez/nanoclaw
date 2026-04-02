@@ -388,21 +388,6 @@ async function runQuery(
     }
   }
 
-  // Also include subdirectories of /workspace/group that contain a CLAUDE.md
-  // This covers git repos (e.g. antoplex) cloned directly into the group folder
-  const groupBase = '/workspace/group';
-  for (const entry of fs.readdirSync(groupBase)) {
-    const fullPath = path.join(groupBase, entry);
-    try {
-      if (fs.statSync(fullPath).isDirectory() &&
-          fs.existsSync(path.join(fullPath, 'CLAUDE.md'))) {
-        extraDirs.push(fullPath);
-      }
-    } catch {
-      // skip unreadable entries
-    }
-  }
-
   if (extraDirs.length > 0) {
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
