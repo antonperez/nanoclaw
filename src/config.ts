@@ -16,6 +16,7 @@ const envConfig = readEnvFile([
   'OLLAMA_HOST',
   'OLLAMA_MODEL',
   'RESET_DEFAULT_WINDOW',
+  'TELEGRAM_BOT_POOL',
   'TZ',
 ]);
 
@@ -130,7 +131,11 @@ export const RESET_DEFAULT_WINDOW = parseInt(
   10,
 );
 
-export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+export const TELEGRAM_BOT_POOL = (
+  process.env.TELEGRAM_BOT_POOL ||
+  envConfig.TELEGRAM_BOT_POOL ||
+  ''
+)
   .split(',')
   .map((t) => t.trim())
   .filter(Boolean);

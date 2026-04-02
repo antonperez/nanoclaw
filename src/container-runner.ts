@@ -228,6 +228,11 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Main containers start as root and need SYS_ADMIN to mount --bind shadow .env
+  if (isMain) {
+    args.push('--cap-add', 'SYS_ADMIN');
+  }
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
@@ -261,11 +266,12 @@ async function buildContainerArgs(
   args.push(...hostGatewayArgs());
 
   // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
+  // Skip when running as root (uid 0) or when getuid is unavailable (native Windows without WSL).
+  // Note: uid 1000 matches the container's node user — still need setpriv for main containers
+  // to drop from root (required for mount --bind) down to node/1000.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+  if (hostUid != null && hostUid !== 0) {
     if (isMain) {
       // Main containers start as root so the entrypoint can mount --bind
       // to shadow .env. Privileges are dropped via setpriv in entrypoint.sh.
