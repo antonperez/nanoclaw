@@ -39,12 +39,21 @@ function proxyDavRequest(
   maxRedirects = 5,
 ): void {
   const upstream = httpsRequest(
-    { hostname, port: 443, path, method, headers: reqHeaders } as RequestOptions,
+    {
+      hostname,
+      port: 443,
+      path,
+      method,
+      headers: reqHeaders,
+    } as RequestOptions,
     (upRes) => {
       const status = upRes.statusCode ?? 0;
       // Follow redirects, re-injecting auth on every hop
       if (
-        (status === 301 || status === 302 || status === 307 || status === 308) &&
+        (status === 301 ||
+          status === 302 ||
+          status === 307 ||
+          status === 308) &&
         maxRedirects > 0
       ) {
         const loc = upRes.headers.location;
@@ -115,7 +124,14 @@ function handleDavRequest(
   delete headers['keep-alive'];
   delete headers['transfer-encoding'];
 
-  proxyDavRequest(req.method ?? 'GET', defaultHost, strippedPath, headers, body, res);
+  proxyDavRequest(
+    req.method ?? 'GET',
+    defaultHost,
+    strippedPath,
+    headers,
+    body,
+    res,
+  );
 }
 
 export function startCredentialProxy(
@@ -132,7 +148,8 @@ export function startCredentialProxy(
   ]);
 
   const icloudEmail = process.env.ICLOUD_EMAIL || secrets.ICLOUD_EMAIL;
-  const icloudPass = process.env.ICLOUD_APP_PASSWORD || secrets.ICLOUD_APP_PASSWORD;
+  const icloudPass =
+    process.env.ICLOUD_APP_PASSWORD || secrets.ICLOUD_APP_PASSWORD;
   const icloudBasicAuth =
     icloudEmail && icloudPass
       ? Buffer.from(`${icloudEmail}:${icloudPass}`).toString('base64')
