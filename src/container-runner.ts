@@ -240,6 +240,12 @@ async function buildContainerArgs(
     `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
 
+  // iCloud DAV base URL — agents use this to make CalDAV/CardDAV requests via the proxy
+  args.push(
+    '-e',
+    `NANOCLAW_DAV_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__dav`,
+  );
+
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
   // OAuth mode:   SDK exchanges placeholder token for temp API key,

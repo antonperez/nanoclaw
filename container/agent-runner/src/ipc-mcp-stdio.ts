@@ -379,6 +379,101 @@ server.tool(
   },
 );
 
+// iCloud DAV tools — credentials are injected by the host credential proxy
+const DAV_URL = process.env.NANOCLAW_DAV_URL;
+
+async function davFetch(
+  type: 'caldav' | 'carddav',
+  method: string,
+  path: string,
+  body?: string,
+  extraHeaders?: Record<string, string>,
+): Promise<{ status: number; text: string }> {
+  if (!DAV_URL) throw new Error('NANOCLAW_DAV_URL not set');
+  const url = `${DAV_URL}/${type}${path.startsWith('/') ? path : '/' + path}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/xml; charset=utf-8',
+    ...extraHeaders,
+  };
+  if (body) headers['Content-Length'] = String(Buffer.byteLength(body, 'utf-8'));
+  const resp = await fetch(url, { method, headers, body });
+  const text = await resp.text();
+  return { status: resp.status, text };
+}
+
+server.tool(
+  'caldav_request',
+  `Make an authenticated CalDAV request to iCloud Calendar via the credential proxy.
+Credentials (ICLOUD_EMAIL + ICLOUD_APP_PASSWORD) are injected automatically — never include them in requests.
+
+Common operations:
+• Discovery: PROPFIND /.well-known/caldav (Depth: 0) → find current-user-principal href
+• Calendar home: PROPFIND <principal-path> (Depth: 0) → find calendar-home-set href
+• List calendars: PROPFIND <calendar-home-path> (Depth: 1) → calendars with displayname
+• Query events: REPORT <calendar-path> (Depth: 1) with calendar-query XML
+• Create/update event: PUT <calendar-path>/<uid>.ics with iCal body (Content-Type: text/calendar)
+• Delete event: DELETE <event-path>
+
+Redirects are followed automatically.`,
+  {
+    method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE', 'MKCALENDAR']).describe('HTTP method'),
+    path: z.string().describe('Path on caldav.icloud.com (e.g. /.well-known/caldav or /1234567890/calendars/)'),
+    body: z.string().optional().describe('Request body — XML for PROPFIND/REPORT, iCal for PUT'),
+    depth: z.enum(['0', '1', 'infinity']).optional().describe('DAV Depth header (for PROPFIND/REPORT)'),
+    content_type: z.string().optional().describe('Content-Type override (default: application/xml). Use text/calendar for PUT with iCal data.'),
+    etag: z.string().optional().describe('ETag for conditional updates (sets If-Match header)'),
+  },
+  async (args) => {
+    try {
+      const extra: Record<string, string> = {};
+      if (args.depth) extra['Depth'] = args.depth;
+      if (args.content_type) extra['Content-Type'] = args.content_type;
+      if (args.etag) extra['If-Match'] = args.etag;
+      const { status, text } = await davFetch('caldav', args.method, args.path, args.body, extra);
+      return { content: [{ type: 'text' as const, text: `HTTP ${status}\n\n${text}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `CalDAV error: ${err}` }], isError: true };
+    }
+  },
+);
+
+server.tool(
+  'carddav_request',
+  `Make an authenticated CardDAV request to iCloud Contacts via the credential proxy.
+Credentials are injected automatically.
+
+Common operations:
+• Discovery: PROPFIND /.well-known/carddav (Depth: 0) → find current-user-principal href
+• Address book home: PROPFIND <principal-path> (Depth: 0) → find addressbook-home-set href
+• List address books: PROPFIND <addressbook-home-path> (Depth: 1)
+• Search contacts: REPORT <addressbook-path> (Depth: 1) with addressbook-query XML
+• Get contact: GET <contact-path> → returns vCard data
+• Create/update contact: PUT <addressbook-path>/<uid>.vcf with vCard body (Content-Type: text/vcard)
+• Delete contact: DELETE <contact-path>
+
+Redirects are followed automatically.`,
+  {
+    method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE']).describe('HTTP method'),
+    path: z.string().describe('Path on contacts.icloud.com (e.g. /.well-known/carddav)'),
+    body: z.string().optional().describe('Request body — XML for PROPFIND/REPORT, vCard for PUT'),
+    depth: z.enum(['0', '1', 'infinity']).optional().describe('DAV Depth header'),
+    content_type: z.string().optional().describe('Content-Type override (default: application/xml). Use text/vcard for PUT.'),
+    etag: z.string().optional().describe('ETag for conditional updates (sets If-Match header)'),
+  },
+  async (args) => {
+    try {
+      const extra: Record<string, string> = {};
+      if (args.depth) extra['Depth'] = args.depth;
+      if (args.content_type) extra['Content-Type'] = args.content_type;
+      if (args.etag) extra['If-Match'] = args.etag;
+      const { status, text } = await davFetch('carddav', args.method, args.path, args.body, extra);
+      return { content: [{ type: 'text' as const, text: `HTTP ${status}\n\n${text}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `CardDAV error: ${err}` }], isError: true };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
