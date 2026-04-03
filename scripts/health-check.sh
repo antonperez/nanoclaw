@@ -27,8 +27,14 @@ TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 # Check pm2 daemon
 if ! "$PM2" ping > /dev/null 2>&1; then
   "$PM2" resurrect > /dev/null 2>&1 || true
-  send_alert "⚠️ *NanoClaw health check*
-pm2 daemon was down — resurrection attempted at ${TIMESTAMP}."
+  sleep 5
+  if "$PM2" ping > /dev/null 2>&1; then
+    send_alert "✅ *NanoClaw health check*
+pm2 daemon was down at ${TIMESTAMP} — resurrected successfully."
+  else
+    send_alert "🔴 *NanoClaw health check*
+pm2 daemon was down at ${TIMESTAMP} — resurrection failed. Manual intervention needed."
+  fi
   exit 0
 fi
 
@@ -37,8 +43,15 @@ STATUS=$("$PM2" show nanoclaw 2>/dev/null | grep -c "online" || echo 0)
 
 if [ "$STATUS" -eq 0 ]; then
   "$PM2" restart nanoclaw > /dev/null 2>&1 || true
-  send_alert "⚠️ *NanoClaw health check*
-nanoclaw was not online — restarted at ${TIMESTAMP}."
+  sleep 5
+  STATUS_AFTER=$("$PM2" show nanoclaw 2>/dev/null | grep -c "online" || echo 0)
+  if [ "$STATUS_AFTER" -gt 0 ]; then
+    send_alert "✅ *NanoClaw health check*
+nanoclaw was down at ${TIMESTAMP} — restarted successfully."
+  else
+    send_alert "🔴 *NanoClaw health check*
+nanoclaw was down at ${TIMESTAMP} — restart failed. Manual intervention needed."
+  fi
 fi
 
 exit 0
