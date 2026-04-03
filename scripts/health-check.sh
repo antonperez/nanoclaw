@@ -8,28 +8,38 @@ export PATH="/home/anton/.nvm/versions/node/v20.20.2/bin:$PATH"
 PM2="/home/anton/.nvm/versions/node/v20.20.2/bin/pm2"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
+ERROR_LOG="/home/anton/.pm2/logs/nanoclaw-error.log"
+STATE_FILE="/run/user/$(id -u)/nanoclaw-health-state"
+
+# Skip within 2 minutes of boot — pm2 may still be starting up
+UPTIME_SECONDS=$(awk '{print int($1)}' /proc/uptime)
+if [ "$UPTIME_SECONDS" -lt 120 ]; then
+  exit 0
+fi
 
 send_alert() {
   local msg="$1"
   local bot_token chat_id
   bot_token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
   chat_id=$(tr -d 'tg:' < "$CHAT_ID_FILE")
-  curl -s -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
+  # || true: don't fail if internet is down — alert is best-effort
+  curl -s --max-time 10 -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
     -d "chat_id=${chat_id}" \
     -d "parse_mode=Markdown" \
     --data-urlencode "text=${msg}" \
-    > /dev/null
+    > /dev/null || true
 }
 
 trap 'send_alert "🔴 *health-check.sh crashed* at $(date +"%Y-%m-%d %H:%M:%S") (line ${LINENO})"' ERR
 
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-# Check pm2 daemon
+# --- pm2 daemon check ---
 if ! "$PM2" ping > /dev/null 2>&1; then
   "$PM2" resurrect > /dev/null 2>&1 || true
   sleep 5
   if "$PM2" ping > /dev/null 2>&1; then
+    "$PM2" save > /dev/null 2>&1 || true
     send_alert "✅ *NanoClaw health check*
 pm2 daemon was down at ${TIMESTAMP} — resurrected successfully."
   else
@@ -39,7 +49,7 @@ pm2 daemon was down at ${TIMESTAMP} — resurrection failed. Manual intervention
   exit 0
 fi
 
-# Check nanoclaw process status
+# --- nanoclaw process check ---
 STATUS=$("$PM2" show nanoclaw 2>/dev/null | grep -c "online" || echo 0)
 
 if [ "$STATUS" -eq 0 ]; then
@@ -47,6 +57,7 @@ if [ "$STATUS" -eq 0 ]; then
   sleep 5
   STATUS_AFTER=$("$PM2" show nanoclaw 2>/dev/null | grep -c "online" || echo 0)
   if [ "$STATUS_AFTER" -gt 0 ]; then
+    "$PM2" save > /dev/null 2>&1 || true
     send_alert "✅ *NanoClaw health check*
 nanoclaw was down at ${TIMESTAMP} — restarted successfully."
   else
@@ -55,19 +66,22 @@ nanoclaw was down at ${TIMESTAMP} — restart failed. Manual intervention needed
   fi
 fi
 
-# Check error threshold — alert if >=3 ERRORs in the last 5 minutes
-ERROR_LOG="/home/anton/.pm2/logs/nanoclaw-error.log"
+# --- error threshold check ---
+# Tracks log line position in a tmpfs state file (cleared on reboot, persists between runs).
+# Counts only NEW errors since last check — immune to old entries at the same clock time.
 ERROR_THRESHOLD=3
-WINDOW_MINUTES=5
-CUTOFF=$(date -d "${WINDOW_MINUTES} minutes ago" '+%H:%M:%S')
-RECENT_COUNT=$(awk -v cutoff="$CUTOFF" '
-  /ERROR/ { match($0, /\[([0-9]{2}:[0-9]{2}:[0-9]{2})/, t); if (t[1] >= cutoff) count++ }
-  END { print count+0 }
-' "$ERROR_LOG" 2>/dev/null || echo 0)
+CURRENT_LINES=$(wc -l < "$ERROR_LOG" 2>/dev/null || echo 0)
+PREV_LINES=$(cat "$STATE_FILE" 2>/dev/null || echo "$CURRENT_LINES")
+echo "$CURRENT_LINES" > "$STATE_FILE"
 
-if [ "$RECENT_COUNT" -ge "$ERROR_THRESHOLD" ]; then
+NEW_ERRORS=0
+if [ "$CURRENT_LINES" -gt "$PREV_LINES" ]; then
+  NEW_ERRORS=$(tail -n "+$((PREV_LINES + 1))" "$ERROR_LOG" 2>/dev/null | grep -c "ERROR" || echo 0)
+fi
+
+if [ "$NEW_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
   send_alert "⚠️ *NanoClaw error threshold*
-${RECENT_COUNT} errors in the last ${WINDOW_MINUTES} minutes at ${TIMESTAMP}."
+${NEW_ERRORS} new errors in the last 5 minutes at ${TIMESTAMP}."
 fi
 
 exit 0
