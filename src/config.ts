@@ -124,6 +124,8 @@ export const OLLAMA_HOST =
   process.env.OLLAMA_HOST || envConfig.OLLAMA_HOST || 'http://localhost:11434';
 export const OLLAMA_DEFAULT_MODEL =
   process.env.OLLAMA_MODEL || envConfig.OLLAMA_MODEL || 'anton-vault';
+// True only when OLLAMA_HOST is explicitly configured; false when falling back to localhost default
+export const OLLAMA_CONFIGURED = !!(process.env.OLLAMA_HOST || envConfig.OLLAMA_HOST);
 
 // /reset command — clear Claude session and reload N messages of context
 export const RESET_DEFAULT_WINDOW = parseInt(

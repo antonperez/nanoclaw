@@ -4,6 +4,7 @@
 
 set -euo pipefail
 
+export PATH="/home/anton/.nvm/versions/node/v20.20.2/bin:$PATH"
 PM2="/home/anton/.nvm/versions/node/v20.20.2/bin/pm2"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
