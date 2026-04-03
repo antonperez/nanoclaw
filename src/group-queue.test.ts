@@ -481,4 +481,23 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  it('calls onMaxRetriesFn with groupJid when retries are exhausted', async () => {
+    const onMaxRetries = vi.fn(async (_groupJid: string) => {});
+    queue.setProcessMessagesFn(vi.fn(async () => false));
+    queue.setOnMaxRetriesFn(onMaxRetries);
+
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Exhaust all retries (initial + 5 retries)
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(5000 + 10);
+    await vi.advanceTimersByTimeAsync(10000 + 10);
+    await vi.advanceTimersByTimeAsync(20000 + 10);
+    await vi.advanceTimersByTimeAsync(40000 + 10);
+    await vi.advanceTimersByTimeAsync(80000 + 10);
+
+    expect(onMaxRetries).toHaveBeenCalledOnce();
+    expect(onMaxRetries).toHaveBeenCalledWith('group1@g.us');
+  });
 });
