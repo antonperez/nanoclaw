@@ -33,7 +33,6 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
-  private onMaxRetriesFn: ((groupJid: string) => Promise<void>) | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -60,11 +59,7 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
-  setOnMaxRetriesFn(fn: (groupJid: string) => Promise<void>): void {
-    this.onMaxRetriesFn = fn;
-  }
-
-  enqueueMessageCheck(groupJid: string): void {
+enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
@@ -273,9 +268,6 @@ export class GroupQueue {
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
       );
       state.retryCount = 0;
-      this.onMaxRetriesFn?.(groupJid).catch((err) =>
-        logger.error({ err, groupJid }, 'Failed to send max-retries alert'),
-      );
       return;
     }
 

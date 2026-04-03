@@ -818,16 +818,7 @@ async function main(): Promise<void> {
     },
   });
   queue.setProcessMessagesFn(processGroupMessages);
-  queue.setOnMaxRetriesFn(async (groupJid) => {
-    const channel = findChannel(channels, groupJid);
-    if (channel) {
-      await channel.sendMessage(
-        groupJid,
-        '⚠️ Agent failed after 5 retries and gave up. I\'ll try again on your next message.',
-      );
-    }
-  });
-  recoverPendingMessages();
+recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

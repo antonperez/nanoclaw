@@ -55,4 +55,19 @@ nanoclaw was down at ${TIMESTAMP} — restart failed. Manual intervention needed
   fi
 fi
 
+# Check error threshold — alert if >=3 ERRORs in the last 5 minutes
+ERROR_LOG="/home/anton/.pm2/logs/nanoclaw-error.log"
+ERROR_THRESHOLD=3
+WINDOW_MINUTES=5
+CUTOFF=$(date -d "${WINDOW_MINUTES} minutes ago" '+%H:%M:%S')
+RECENT_COUNT=$(awk -v cutoff="$CUTOFF" '
+  /ERROR/ { match($0, /\[([0-9]{2}:[0-9]{2}:[0-9]{2})/, t); if (t[1] >= cutoff) count++ }
+  END { print count+0 }
+' "$ERROR_LOG" 2>/dev/null || echo 0)
+
+if [ "$RECENT_COUNT" -ge "$ERROR_THRESHOLD" ]; then
+  send_alert "⚠️ *NanoClaw error threshold*
+${RECENT_COUNT} errors in the last ${WINDOW_MINUTES} minutes at ${TIMESTAMP}."
+fi
+
 exit 0
