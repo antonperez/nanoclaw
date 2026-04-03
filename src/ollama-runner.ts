@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { NewMessage } from './types.js';
-import { OLLAMA_CONFIGURED, OLLAMA_DEFAULT_MODEL, OLLAMA_HOST } from './config.js';
+import {
+  OLLAMA_CONFIGURED,
+  OLLAMA_DEFAULT_MODEL,
+  OLLAMA_HOST,
+} from './config.js';
 import { logger } from './logger.js';
 
 const MAX_TOOL_TURNS = 10;
@@ -117,7 +121,9 @@ export async function runOllamaAgent(
   onOutput: (text: string) => Promise<void>,
 ): Promise<'success' | 'error'> {
   if (!OLLAMA_CONFIGURED) {
-    await onOutput('Ollama is not configured on this host. Set OLLAMA_HOST in .env to enable local model support.');
+    await onOutput(
+      'Ollama is not configured on this host. Set OLLAMA_HOST in .env to enable local model support.',
+    );
     return 'error';
   }
 

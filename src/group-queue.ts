@@ -59,7 +59,7 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
-enqueueMessageCheck(groupJid: string): void {
+  enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
