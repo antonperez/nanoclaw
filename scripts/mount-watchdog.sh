@@ -8,23 +8,27 @@ MOUNT="/mnt/pi-data"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 
+_send_telegram() {
+  local token chat_id msg="$1"
+  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
+  chat_id=$(tr -d 'tg:' < "$CHAT_ID_FILE")
+  curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    -d "parse_mode=Markdown" \
+    --data-urlencode "text=${msg}" \
+    > /dev/null
+}
+
+trap '_send_telegram "🔴 *mount-watchdog.sh crashed* at $(date +"%Y-%m-%d %H:%M:%S") (line ${LINENO})"' ERR
+
 if mountpoint -q "$MOUNT"; then
   exit 0
 fi
 
 # Mount is down — send Telegram alert
-BOT_TOKEN=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-CHAT_ID=$(cat "$CHAT_ID_FILE" | tr -d 'tg:')
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-
-MSG="⚠️ *Mount alert*
+_send_telegram "⚠️ *Mount alert*
 ${MOUNT} is NOT mounted at ${TIMESTAMP}.
 NanoClaw data (store, logs, groups) is unavailable. Check USB drive."
-
-curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-  -d "chat_id=${CHAT_ID}" \
-  -d "parse_mode=Markdown" \
-  --data-urlencode "text=${MSG}" \
-  > /dev/null
 
 exit 0

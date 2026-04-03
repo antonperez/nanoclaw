@@ -12,13 +12,15 @@ send_alert() {
   local msg="$1"
   local bot_token chat_id
   bot_token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-  chat_id=$(cat "$CHAT_ID_FILE" | tr -d 'tg:')
+  chat_id=$(tr -d 'tg:' < "$CHAT_ID_FILE")
   curl -s -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
     -d "chat_id=${chat_id}" \
     -d "parse_mode=Markdown" \
     --data-urlencode "text=${msg}" \
     > /dev/null
 }
+
+trap 'send_alert "🔴 *health-check.sh crashed* at $(date +"%Y-%m-%d %H:%M:%S") (line ${LINENO})"' ERR
 
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
