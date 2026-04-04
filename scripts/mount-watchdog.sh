@@ -25,6 +25,12 @@ if mountpoint -q "$MOUNT"; then
   exit 0
 fi
 
+# Skip alert within 3 minutes of boot — drive may still be spinning up
+UPTIME_SECONDS=$(awk '{print int($1)}' /proc/uptime)
+if [ "$UPTIME_SECONDS" -lt 180 ]; then
+  exit 0
+fi
+
 # Mount is down — send Telegram alert
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 _send_telegram "⚠️ *Mount alert*
