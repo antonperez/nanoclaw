@@ -13,6 +13,41 @@ PM2="/home/anton/.nvm/versions/node/v20.20.2/bin/pm2"
 PERF_LOG="/mnt/pi-data/nanoclaw/logs/perf.jsonl"
 SCAN_REF="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-perf-scan-ref"
 GROUPS_DIR="/home/anton/nanoclaw/groups"
+NANOCLAW_DIR="/home/anton/nanoclaw"
+BOOT_TS_FILE="/mnt/pi-data/nanoclaw/logs/last-boot-ts"
+
+# --- Boot detection + Telegram notification ---
+CURRENT_BOOT=$(awk '{print int($1)}' /proc/uptime)
+# Convert uptime-seconds to an absolute boot epoch for stable comparison
+CURRENT_BOOT_EPOCH=$(( $(date +%s) - CURRENT_BOOT ))
+
+notify_restart() {
+  local bot_token chat_id uptime_min msg
+  bot_token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$NANOCLAW_DIR/.env" 2>/dev/null | cut -d= -f2-) || return
+  local chat_id_file="$NANOCLAW_DIR/groups/telegram_main/team-chat-jid"
+  [ -f "$chat_id_file" ] || return
+  chat_id=$(sed 's/^tg://' "$chat_id_file")
+  uptime_min=$(( CURRENT_BOOT / 60 ))
+  msg="🔄 *Pi4 rebooted* — NanoClaw back online
+Time: $(date '+%Y-%m-%d %H:%M:%S')
+Uptime: ${uptime_min}m"
+  curl -s -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
+    -d "chat_id=${chat_id}" \
+    -d "parse_mode=Markdown" \
+    --data-urlencode "text=${msg}" \
+    > /dev/null || true
+}
+
+if [ -f "$BOOT_TS_FILE" ]; then
+  LAST_BOOT_EPOCH=$(cat "$BOOT_TS_FILE")
+  if [ "$CURRENT_BOOT_EPOCH" != "$LAST_BOOT_EPOCH" ]; then
+    notify_restart
+    echo "$CURRENT_BOOT_EPOCH" > "$BOOT_TS_FILE"
+  fi
+else
+  # First run — record boot epoch, no notification (no baseline to compare against)
+  echo "$CURRENT_BOOT_EPOCH" > "$BOOT_TS_FILE"
+fi
 
 # --- System metrics ---
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)

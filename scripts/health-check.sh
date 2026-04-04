@@ -10,6 +10,7 @@ ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 ERROR_LOG="/home/anton/.pm2/logs/nanoclaw-error.log"
 STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-health-state"
+RESTART_COUNT_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-restart-count"
 
 # Skip within 2 minutes of boot — pm2 may still be starting up
 UPTIME_SECONDS=$(awk '{print int($1)}' /proc/uptime)
@@ -63,6 +64,26 @@ nanoclaw was down at ${TIMESTAMP} — restarted successfully."
   else
     send_alert "🔴 *NanoClaw health check*
 nanoclaw was down at ${TIMESTAMP} — restart failed. Manual intervention needed."
+  fi
+fi
+
+# --- PM2 auto-restart detection ---
+# Detects when PM2 restarted nanoclaw on its own (crash recovery), not via this script.
+# Only fires when nanoclaw was already online — health-check-triggered restarts are
+# reported by the block above.
+if [ "$STATUS" -gt 0 ]; then
+  CURRENT_RESTARTS=$("$PM2" jlist 2>/dev/null | python3 -c "
+import json,sys
+data=json.load(sys.stdin)
+nc=next((p for p in data if p.get('name')=='nanoclaw'),None)
+print(nc.get('pm2_env',{}).get('restart_time',0) if nc else 0)
+" 2>/dev/null || echo 0)
+  PREV_RESTARTS=$(cat "$RESTART_COUNT_FILE" 2>/dev/null || echo "$CURRENT_RESTARTS")
+  echo "$CURRENT_RESTARTS" > "$RESTART_COUNT_FILE"
+  if [ "$CURRENT_RESTARTS" -gt "$PREV_RESTARTS" ]; then
+    DELTA=$(( CURRENT_RESTARTS - PREV_RESTARTS ))
+    send_alert "🔄 *NanoClaw process restarted* (Pi4)
+PM2 auto-restarted nanoclaw ${DELTA}x (total restarts: ${CURRENT_RESTARTS}) at ${TIMESTAMP}."
   fi
 fi
 
