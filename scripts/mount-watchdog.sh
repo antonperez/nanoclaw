@@ -11,7 +11,7 @@ CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 _send_telegram() {
   local token chat_id msg="$1"
   token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-  chat_id=$(tr -d 'tg:' < "$CHAT_ID_FILE")
+  chat_id=$(sed 's/^tg://' "$CHAT_ID_FILE")
   curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
     -d "chat_id=${chat_id}" \
     -d "parse_mode=Markdown" \

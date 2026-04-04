@@ -14,7 +14,7 @@ CHAT_ID_FILE="$NANOCLAW_DIR/groups/telegram_main/team-chat-jid"
 
 # Load bot token from .env
 BOT_TOKEN=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-CHAT_ID=$(cat "$CHAT_ID_FILE" | tr -d 'tg:')
+CHAT_ID=$(sed 's/^tg://' "$CHAT_ID_FILE")
 
 JOB_NAME="$1"
 shift

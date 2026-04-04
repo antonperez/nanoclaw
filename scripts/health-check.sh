@@ -9,7 +9,7 @@ PM2="/home/anton/.nvm/versions/node/v20.20.2/bin/pm2"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 ERROR_LOG="/home/anton/.pm2/logs/nanoclaw-error.log"
-STATE_FILE="/run/user/$(id -u)/nanoclaw-health-state"
+STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-health-state"
 
 # Skip within 2 minutes of boot — pm2 may still be starting up
 UPTIME_SECONDS=$(awk '{print int($1)}' /proc/uptime)
@@ -21,7 +21,7 @@ send_alert() {
   local msg="$1"
   local bot_token chat_id
   bot_token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
-  chat_id=$(tr -d 'tg:' < "$CHAT_ID_FILE")
+  chat_id=$(sed 's/^tg://' "$CHAT_ID_FILE")
   # || true: don't fail if internet is down — alert is best-effort
   curl -s --max-time 10 -X POST "https://api.telegram.org/bot${bot_token}/sendMessage" \
     -d "chat_id=${chat_id}" \
@@ -45,8 +45,8 @@ pm2 daemon was down at ${TIMESTAMP} — resurrected successfully."
   else
     send_alert "🔴 *NanoClaw health check*
 pm2 daemon was down at ${TIMESTAMP} — resurrection failed. Manual intervention needed."
+    exit 0
   fi
-  exit 0
 fi
 
 # --- nanoclaw process check ---
@@ -81,7 +81,7 @@ fi
 
 if [ "$NEW_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
   send_alert "⚠️ *NanoClaw error threshold*
-${NEW_ERRORS} new errors in the last 5 minutes at ${TIMESTAMP}."
+${NEW_ERRORS} new errors since last check at ${TIMESTAMP}."
 fi
 
 exit 0
