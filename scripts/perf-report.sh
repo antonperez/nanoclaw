@@ -7,6 +7,7 @@ set -euo pipefail
 PERF_LOG="/mnt/pi-data/nanoclaw/logs/perf.jsonl"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
+CHART_TMP="/tmp/nanoclaw-perf-chart.png"
 
 [ -f "$PERF_LOG" ] || { echo "No perf log yet"; exit 0; }
 
@@ -149,8 +150,96 @@ PM2 uptime: {online_pct:.1f}% · Restarts: {pm2_restarts}
 PYEOF
 )
 
+# --- Generate time series chart ---
+python3 << 'PYEOF'
+import json, os, sys
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from datetime import datetime, timedelta, timezone
+
+PERF_LOG = "/mnt/pi-data/nanoclaw/logs/perf.jsonl"
+CHART_OUT = "/tmp/nanoclaw-perf-chart.png"
+CUTOFF = datetime.now(timezone.utc) - timedelta(hours=84)
+
+timestamps, loads, temps, mems = [], [], [], []
+with open(PERF_LOG) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+            ts = datetime.fromisoformat(d['ts'].replace('Z', '+00:00'))
+            if ts < CUTOFF:
+                continue
+            timestamps.append(ts)
+            loads.append(d.get('load_1', 0))
+            temps.append(d.get('cpu_temp_c', 0))
+            mems.append(d.get('mem_used_mb', 0))
+        except Exception:
+            pass
+
+if not timestamps:
+    sys.exit(0)
+
+mem_total = 7819  # fixed Pi4 total
+
+fig, axes = plt.subplots(3, 1, figsize=(10, 7), sharex=True)
+fig.patch.set_facecolor('#1a1a2e')
+for ax in axes:
+    ax.set_facecolor('#16213e')
+    ax.tick_params(colors='#aaaacc', labelsize=8)
+    ax.yaxis.label.set_color('#aaaacc')
+    for spine in ax.spines.values():
+        spine.set_edgecolor('#333355')
+
+# Load
+axes[0].plot(timestamps, loads, color='#4fc3f7', linewidth=0.8)
+axes[0].axhline(y=1.0, color='#f7c948', linewidth=0.6, linestyle='--', alpha=0.6)
+axes[0].set_ylabel('Load (1m)')
+axes[0].set_ylim(bottom=0)
+
+# Temp
+axes[1].plot(timestamps, temps, color='#ff7043', linewidth=0.8)
+axes[1].axhline(y=75, color='#ef5350', linewidth=0.6, linestyle='--', alpha=0.6)
+axes[1].set_ylabel('Temp (°C)')
+axes[1].set_ylim(bottom=0)
+
+# Mem
+mem_pct = [m / mem_total * 100 for m in mems]
+axes[2].fill_between(timestamps, mem_pct, alpha=0.4, color='#ab47bc')
+axes[2].plot(timestamps, mem_pct, color='#ab47bc', linewidth=0.8)
+axes[2].axhline(y=85, color='#ef5350', linewidth=0.6, linestyle='--', alpha=0.6)
+axes[2].set_ylabel('Mem (%)')
+axes[2].set_ylim(0, 100)
+
+# X axis formatting
+axes[2].xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+axes[2].xaxis.set_major_locator(mdates.AutoDateLocator())
+plt.setp(axes[2].xaxis.get_majorticklabels(), rotation=30, ha='right', color='#aaaacc')
+
+period_start = timestamps[0].strftime('%Y-%m-%d')
+period_end   = timestamps[-1].strftime('%Y-%m-%d')
+fig.suptitle(f'NanoClaw Pi4 · {period_start} → {period_end}', color='#ccccee', fontsize=11)
+plt.tight_layout()
+plt.savefig(CHART_OUT, dpi=130, bbox_inches='tight', facecolor=fig.get_facecolor())
+plt.close()
+PYEOF
+
+# --- Send text report ---
 curl -s --max-time 10 -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
   -d "chat_id=${CHAT_ID}" \
   -d "parse_mode=Markdown" \
   --data-urlencode "text=${REPORT}" \
   > /dev/null
+
+# --- Send chart if generated ---
+if [ -f "$CHART_TMP" ]; then
+  curl -s --max-time 30 -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto" \
+    -F "chat_id=${CHAT_ID}" \
+    -F "photo=@${CHART_TMP}" \
+    > /dev/null
+  rm -f "$CHART_TMP"
+fi
