@@ -18,8 +18,8 @@ BOOT_TS_FILE="/mnt/pi-data/nanoclaw/logs/last-boot-ts"
 
 # --- Boot detection + Telegram notification ---
 CURRENT_BOOT=$(awk '{print int($1)}' /proc/uptime)
-# Convert uptime-seconds to an absolute boot epoch for stable comparison
-CURRENT_BOOT_EPOCH=$(( $(date +%s) - CURRENT_BOOT ))
+# Use /proc/stat btime — kernel's actual boot epoch, fixed for the lifetime of a boot
+CURRENT_BOOT_EPOCH=$(awk '/^btime / {print $2}' /proc/stat)
 
 notify_restart() {
   local bot_token chat_id uptime_min msg
