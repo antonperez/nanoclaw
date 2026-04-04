@@ -73,3 +73,33 @@ touch "$SCAN_REF"
 cat >> "$PERF_LOG" << EOF
 {"ts":"$TS","load_1":$LOAD_1,"load_5":$LOAD_5,"load_15":$LOAD_15,"mem_used_mb":$MEM_USED_MB,"mem_total_mb":$MEM_TOTAL_MB,"cpu_temp_c":$CPU_TEMP,"cpu_freq_mhz":$CPU_FREQ_MHZ,"df_root_used_mb":$DF_ROOT_USED_MB,"df_root_total_mb":$DF_ROOT_TOTAL_MB,"df_data_used_mb":$DF_DATA_USED_MB,"df_data_total_mb":$DF_DATA_TOTAL_MB,"pm2_status":"$PM2_STATUS","pm2_mem_mb":$PM2_MEM_MB,"pm2_cpu_pct":$PM2_CPU_PCT,"pm2_restarts":$PM2_RESTARTS,"container_runs":$CONTAINER_RUNS,"container_errors":$CONTAINER_ERRORS,"durations_ms":$DURATIONS_JSON}
 EOF
+
+# --- Prune entries older than 7 days (keeps full report window) ---
+python3 - "$PERF_LOG" << 'PYEOF'
+import json, sys, os
+from datetime import datetime, timedelta, timezone
+
+log = sys.argv[1]
+cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+tmp = log + ".tmp"
+
+kept = pruned = 0
+with open(log) as fin, open(tmp, "w") as fout:
+    for line in fin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ts = datetime.fromisoformat(json.loads(line)["ts"].replace("Z", "+00:00"))
+            if ts >= cutoff:
+                fout.write(line + "\n")
+                kept += 1
+            else:
+                pruned += 1
+        except Exception:
+            fout.write(line + "\n")  # keep unparseable lines
+
+os.replace(tmp, log)
+if pruned:
+    print(f"perf-collector: pruned {pruned} samples older than 7d, kept {kept}", flush=True)
+PYEOF

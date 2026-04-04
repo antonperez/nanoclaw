@@ -18,9 +18,12 @@ import json, sys
 from datetime import datetime, timedelta, timezone
 
 PERF_LOG = "/mnt/pi-data/nanoclaw/logs/perf.jsonl"
-CUTOFF = datetime.now(timezone.utc) - timedelta(hours=84)  # ~3.5 days
+TRIAL_END = datetime(2026, 4, 30, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
+CUTOFF = NOW - timedelta(hours=84)  # ~3.5 days
 
 rows = []
+total_in_log = 0
 with open(PERF_LOG) as f:
     for line in f:
         line = line.strip()
@@ -28,11 +31,18 @@ with open(PERF_LOG) as f:
             continue
         try:
             d = json.loads(line)
+            total_in_log += 1
             ts = datetime.fromisoformat(d['ts'].replace('Z', '+00:00'))
             if ts >= CUTOFF:
                 rows.append(d)
         except Exception:
             pass
+
+# Trial progress
+trial_start = datetime(2026, 4, 4, tzinfo=timezone.utc)
+trial_days_elapsed = (NOW - trial_start).days
+trial_days_total = (TRIAL_END - trial_start).days
+trial_pct = min(trial_days_elapsed / trial_days_total * 100, 100)
 
 if not rows:
     print("No data yet for this period.")
@@ -106,8 +116,16 @@ if df_data_pct > 85:
 
 verdict = "✅ Pi4 handling it well" if not issues else "\n".join(issues)
 
+pruned_count = total_in_log - len(rows)
+data_note = f"_{period_start} → {period_end} · {samples} samples"
+if pruned_count > 0:
+    data_note += f" · {pruned_count} pruned (>7d)"
+data_note += "_"
+
 print(f"""📊 *NanoClaw Pi4 Trial Report*
-_{period_start} → {period_end} · {samples} samples_
+{data_note}
+
+*Trial* {trial_days_elapsed}/{trial_days_total}d ({trial_pct:.0f}%)
 
 *System*
 Load: {avg_load:.2f} avg / {max_load:.2f} peak
