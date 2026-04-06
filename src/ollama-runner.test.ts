@@ -16,6 +16,7 @@ vi.mock('node:fs', () => ({
 }));
 
 vi.mock('./config.js', () => ({
+  OLLAMA_CONFIGURED: true,
   OLLAMA_HOST: 'http://localhost:11434',
   OLLAMA_DEFAULT_MODEL: 'test-model',
 }));

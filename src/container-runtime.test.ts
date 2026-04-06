@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import os from 'os';
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return { ...actual, default: { ...actual, platform: () => 'darwin' } };
+});
 
 // Mock logger
 vi.mock('./logger.js', () => ({

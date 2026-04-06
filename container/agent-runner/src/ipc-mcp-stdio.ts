@@ -353,16 +353,20 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
 server.tool(
   'send_email',
-  'Send an email via iCloud SMTP. Use for notifications, summaries, or any content better delivered by email.',
+  'Send an email via iCloud SMTP. Use for notifications, summaries, or any content better delivered by email. Attachments can be any file previously saved to /workspace/group/files/ (e.g. from a Telegram upload).',
   {
     to: z.string().describe('Recipient email address'),
     subject: z.string().describe('Email subject line'),
     body: z.string().describe('Email body (plain text)'),
     cc: z.string().optional().describe('CC email address(es), comma-separated'),
     bcc: z.string().optional().describe('BCC email address(es), comma-separated'),
+    attachments: z
+      .array(z.string())
+      .optional()
+      .describe('Absolute paths to files to attach, e.g. ["/workspace/group/files/report.pdf"]'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    const data: Record<string, string | string[] | undefined> = {
       type: 'send_email',
       to: args.to,
       subject: args.subject,
@@ -372,6 +376,7 @@ server.tool(
     };
     if (args.cc) data.cc = args.cc;
     if (args.bcc) data.bcc = args.bcc;
+    if (args.attachments?.length) data.attachments = args.attachments;
 
     writeIpcFile(EMAILS_DIR, data);
 

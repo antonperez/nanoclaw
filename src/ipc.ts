@@ -35,6 +35,52 @@ export function _resetIpcWatcher(): void {
   ipcWatcherRunning = false;
 }
 
+const MIME_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  ogg: 'audio/ogg',
+  wav: 'audio/wav',
+  txt: 'text/plain',
+};
+
+function mimeForPath(filePath: string): string {
+  const ext = path.extname(filePath).replace('.', '').toLowerCase();
+  return MIME_TYPES[ext] ?? 'application/octet-stream';
+}
+
+function resolveAttachments(
+  containerPaths: string[],
+  groupFolder: string,
+): { filename: string; path: string; contentType: string }[] {
+  const groupDir = path.join(DATA_DIR, '..', 'groups', groupFolder);
+  return containerPaths
+    .map((p) => {
+      // Map /workspace/group/... → groups/{groupFolder}/...
+      const relative = p.replace(/^\/workspace\/group\//, '');
+      const hostPath = path.join(groupDir, relative);
+      return {
+        filename: path.basename(p),
+        path: hostPath,
+        contentType: mimeForPath(p),
+      };
+    })
+    .filter((a) => fs.existsSync(a.path));
+}
+
 function createEmailTransporter() {
   const env = readEnvFile(['ICLOUD_EMAIL', 'ICLOUD_APP_PASSWORD']);
   const user = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
@@ -202,6 +248,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 } else {
                   const env = readEnvFile(['ICLOUD_EMAIL']);
                   const from = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
+                  const resolved =
+                    Array.isArray(data.attachments) && data.attachments.length
+                      ? resolveAttachments(data.attachments, sourceGroup)
+                      : [];
+                  const attachments = resolved.length ? resolved : undefined;
                   await transporter.sendMail({
                     from,
                     to: data.to,
@@ -209,6 +260,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     bcc: data.bcc,
                     subject: data.subject,
                     text: data.body,
+                    attachments,
                   });
                   logger.info(
                     {
@@ -216,6 +268,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       cc: data.cc,
                       bcc: data.bcc,
                       subject: data.subject,
+                      attachments: attachments?.map((a) => a.filename),
                       sourceGroup,
                     },
                     'Email sent via iCloud SMTP',
