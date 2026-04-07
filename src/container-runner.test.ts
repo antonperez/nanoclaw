@@ -66,6 +66,13 @@ vi.mock('./credential-proxy.js', () => ({
   detectAuthMode: vi.fn().mockReturnValue('api-key'),
 }));
 
+// Mock watchdog — container-runner calls register/heartbeat/unregister
+vi.mock('./watchdog.js', () => ({
+  watchdogRegisterRun: vi.fn(),
+  watchdogHeartbeat: vi.fn(),
+  watchdogUnregisterRun: vi.fn(),
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {

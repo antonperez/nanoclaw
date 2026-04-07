@@ -219,6 +219,14 @@ export function startCredentialProxy(
           }
         }
 
+        // 90-second hard timeout on upstream Anthropic API calls.
+        // Without this, a hung API connection keeps the process alive
+        // indefinitely, preventing Docker from ever restarting it.
+        const PROXY_UPSTREAM_TIMEOUT_MS = parseInt(
+          process.env.PROXY_UPSTREAM_TIMEOUT_MS || '90000',
+          10,
+        );
+
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
@@ -226,12 +234,25 @@ export function startCredentialProxy(
             path: req.url,
             method: req.method,
             headers,
+            timeout: PROXY_UPSTREAM_TIMEOUT_MS,
           } as RequestOptions,
           (upRes) => {
             res.writeHead(upRes.statusCode!, upRes.headers);
             upRes.pipe(res);
           },
         );
+
+        upstream.on('timeout', () => {
+          logger.warn(
+            { url: req.url, timeoutMs: PROXY_UPSTREAM_TIMEOUT_MS },
+            'Credential proxy upstream timeout — aborting request',
+          );
+          upstream.destroy();
+          if (!res.headersSent) {
+            res.writeHead(504);
+            res.end('Gateway Timeout');
+          }
+        });
 
         upstream.on('error', (err) => {
           logger.error(

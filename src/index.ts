@@ -15,6 +15,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startWatchdog, stopWatchdog } from './watchdog.js';
 import './channels/index.js';
 import { initBotPool } from './channels/telegram.js';
 import {
@@ -612,9 +613,12 @@ async function main(): Promise<void> {
 
   restoreRemoteControl();
 
+  startWatchdog();
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    stopWatchdog();
     proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();

@@ -16,6 +16,11 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import {
+  watchdogHeartbeat,
+  watchdogRegisterRun,
+  watchdogUnregisterRun,
+} from './watchdog.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -348,6 +353,7 @@ export async function runContainerAgent(
     });
 
     onProcess(container, containerName);
+    watchdogRegisterRun(containerName);
 
     let stdout = '';
     let stderr = '';
@@ -399,8 +405,9 @@ export async function runContainerAgent(
               newSessionId = parsed.newSessionId;
             }
             hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
+            // Activity detected — reset the hard timeout and the watchdog
             resetTimeout();
+            watchdogHeartbeat(containerName);
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain
@@ -477,6 +484,7 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      watchdogUnregisterRun(containerName);
       const duration = Date.now() - startTime;
 
       if (timedOut) {

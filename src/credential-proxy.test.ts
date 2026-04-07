@@ -189,4 +189,42 @@ describe('credential-proxy', () => {
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
   });
+
+  it('returns 504 when upstream hangs past PROXY_UPSTREAM_TIMEOUT_MS', async () => {
+    // Upstream server that accepts the connection but never responds
+    const hangingServer = http.createServer((_req, _res) => {
+      // intentionally never write a response
+    });
+    await new Promise<void>((resolve) =>
+      hangingServer.listen(0, '127.0.0.1', resolve),
+    );
+    const hangingPort = (hangingServer.address() as AddressInfo).port;
+
+    try {
+      Object.assign(mockEnv, {
+        ANTHROPIC_API_KEY: 'sk-ant-real-key',
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${hangingPort}`,
+      });
+      // Set a very short upstream timeout so the test runs fast
+      process.env.PROXY_UPSTREAM_TIMEOUT_MS = '100';
+      proxyServer = await startCredentialProxy(0);
+      proxyPort = (proxyServer.address() as AddressInfo).port;
+
+      const res = await makeRequest(
+        proxyPort,
+        {
+          method: 'POST',
+          path: '/v1/messages',
+          headers: { 'content-type': 'application/json' },
+        },
+        '{}',
+      );
+
+      expect(res.statusCode).toBe(504);
+      expect(res.body).toBe('Gateway Timeout');
+    } finally {
+      delete process.env.PROXY_UPSTREAM_TIMEOUT_MS;
+      await new Promise<void>((r) => hangingServer.close(() => r()));
+    }
+  });
 });
