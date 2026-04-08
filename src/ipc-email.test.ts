@@ -282,9 +282,20 @@ describe('send_email IPC — attachments', () => {
     );
     const call = mockSendMail.mock.calls[0][0];
     expect(call.attachments).toHaveLength(3);
-    expect(call.attachments[0]).toMatchObject({ filename: 'photo.jpg', contentType: 'image/jpeg' });
-    expect(call.attachments[1]).toMatchObject({ filename: 'sheet.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    expect(call.attachments[2]).toMatchObject({ filename: 'doc.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    expect(call.attachments[0]).toMatchObject({
+      filename: 'photo.jpg',
+      contentType: 'image/jpeg',
+    });
+    expect(call.attachments[1]).toMatchObject({
+      filename: 'sheet.xlsx',
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    expect(call.attachments[2]).toMatchObject({
+      filename: 'doc.docx',
+      contentType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
   });
 
   it('skips attachments that do not exist on the host', async () => {

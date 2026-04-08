@@ -6,13 +6,22 @@
   ],
   "conditional_memories": {
     "testing": "testing-strategy.md",
+    "vitest": "testing-strategy.md",
+    "test": "testing-strategy.md",
+    "container": "docker-workflow.md",
+    "docker": "docker-workflow.md",
+    "build": "docker-workflow.md",
     "channels": "architecture.md",
-    "container": "architecture.md",
-    "db": "codebase-conventions.md"
+    "db": "codebase-conventions.md",
+    "ipc": "architecture.md",
+    "email": "architecture.md",
+    "scheduling": "architecture.md",
+    "model-router": "architecture.md"
   },
   "model_overrides": {
     "migrations": "haiku",
     "simple_config_changes": "haiku",
+    "format_fix": "haiku",
     "channel_implementation": "sonnet",
     "security_review": "opus",
     "architectural_decisions": "opus"
@@ -21,7 +30,9 @@
   "skip_full_file_reads": [
     "src/index.ts",
     "src/container-runner.ts",
-    "src/db.ts"
+    "src/db.ts",
+    "src/ipc.ts"
   ],
-  "constitution_path": ".claude/settings/constitution.json"
+  "constitution_path": ".claude/settings/constitution.json",
+  "notes": "Serena MCP not available — use Grep + Read with offset/limit for symbol-first exploration. Always grep for function/class name first to get line number, then Read with offset."
 }

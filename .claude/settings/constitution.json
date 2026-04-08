@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "project": "nanoclaw",
-  "stack": "Node.js 20+ / TypeScript / ESM / Vitest / SQLite",
+  "stack": "Node.js 20+ / TypeScript / ESM / Vitest / SQLite / Apple Container or Docker",
   "principles": [
     {
       "id": "esm-imports",
@@ -14,7 +14,7 @@
     },
     {
       "id": "no-secrets-in-containers",
-      "rule": "API keys and secrets must NEVER be passed to containers directly. All AI/external API calls from containers must route through the credential proxy (port 3001 / unix socket)",
+      "rule": "API keys and secrets must NEVER be passed to containers directly. All AI/external API calls from containers must route through the credential proxy (port 3001). Containers receive a placeholder credential only.",
       "enforcement": "mandatory"
     },
     {
@@ -29,7 +29,7 @@
     },
     {
       "id": "channel-self-registration",
-      "rule": "Channels must use the self-registration pattern: call registerChannel(name, factory) at module load. Factory returns null when credentials are missing.",
+      "rule": "Channels must use the self-registration pattern: call registerChannel(name, factory) at module load. Factory returns null when credentials are missing — never throw.",
       "enforcement": "mandatory",
       "examples": {
         "correct": "registerChannel('slack', (opts) => credentials ? new SlackChannel(opts) : null)"
@@ -37,22 +37,32 @@
     },
     {
       "id": "validate-mount-paths",
-      "rule": "All container mount paths must be validated against the mount allowlist (mount-security.ts) before spawning containers. Never bypass mount security.",
+      "rule": "All container mount paths must be validated against the mount allowlist (mount-security.ts) before spawning containers. Never bypass mount security or accept mount paths from IPC payloads.",
       "enforcement": "mandatory"
     },
     {
       "id": "no-catch-all",
-      "rule": "Never use bare catch blocks or catch(e: any). Always type or narrow errors. Use the eslint-plugin-no-catch-all rules.",
+      "rule": "Never use bare catch blocks or catch(e: any). Always type or narrow errors. ESLint plugin no-catch-all enforces this.",
       "enforcement": "mandatory"
     },
     {
       "id": "structured-logging",
-      "rule": "Always use structured logging: logger.info({ key: value }, 'message'). Never use console.log in src/.",
+      "rule": "Always use structured logging: logger.info({ key: value }, 'message'). Never use console.log in src/. Logger instance is in src/logger.ts.",
       "enforcement": "mandatory"
     },
     {
       "id": "colocated-tests",
       "rule": "Test files must be colocated with source files (foo.test.ts next to foo.ts). No separate test directory.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "ipc-authorization",
+      "rule": "IPC command authorization must be based on the source group's directory identity (not the payload). Non-main groups cannot message other groups, register groups, or schedule tasks for other groups. isMain cannot be set via IPC payload.",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "cursor-rollback",
+      "rule": "When processing messages, save the previous cursor before advancing it. Roll back the cursor on agent error ONLY if no output was sent to the user (to prevent duplicate messages on retry).",
       "enforcement": "mandatory"
     },
     {
@@ -62,15 +72,48 @@
     },
     {
       "id": "no-new-files-without-need",
-      "rule": "Prefer editing existing files over creating new ones. Only create new files when clearly necessary (new channel, new module).",
+      "rule": "Prefer editing existing files over creating new ones. Only create new files when clearly necessary (new channel, new module, new skill).",
       "enforcement": "strong"
     },
     {
       "id": "main-group-privilege",
-      "rule": "Only groups with isMain: true have unrestricted trigger access and can execute privileged operations (register groups, schedule tasks, remote control).",
+      "rule": "Only groups with isMain: true have unrestricted trigger access and can execute privileged operations (register groups, schedule tasks for other groups, send messages to other groups, use remote control).",
+      "enforcement": "mandatory"
+    },
+    {
+      "id": "ipc-email-attachments",
+      "rule": "IPC email attachments must be specified as container paths (/workspace/group/...). The host resolves them to groups/{groupFolder}/... and verifies file existence before sending. Never accept absolute host paths from agents.",
       "enforcement": "mandatory"
     }
   ],
+  "decision_framework": {
+    "new_channel": [
+      "Create src/channels/{name}.ts",
+      "Implement Channel interface from src/types.ts",
+      "Call registerChannel(name, factory) at module load — return null if credentials missing",
+      "Import the new file in src/channels/index.ts",
+      "Add test file src/channels/{name}.test.ts"
+    ],
+    "new_ipc_command": [
+      "Add case to switch in processTaskIpc() in src/ipc.ts",
+      "Check isMain or source group authorization before executing",
+      "Write JSON schema for the command payload",
+      "Add test coverage in src/ipc-*.test.ts",
+      "Update container agent MCP bridge to expose the command as a tool"
+    ],
+    "new_config_value": [
+      "Add env var name to readEnvFile() call in src/config.ts",
+      "Export constant with process.env fallback to envConfig fallback to default",
+      "If secret: add to credential-proxy.ts instead, never config.ts"
+    ],
+    "bug_fix": [
+      "Write a failing test first",
+      "Identify the module and function via architecture.md",
+      "Fix the smallest possible scope",
+      "Verify no cursor rollback invariants are broken",
+      "Run npm test + npm run typecheck"
+    ]
+  },
   "code_quality": {
     "max_function_lines": 50,
     "prefer_explicit_types": true,
@@ -80,6 +123,7 @@
     "no_secrets_in_env_exports": true,
     "validate_ipc_commands": true,
     "validate_mount_paths": true,
-    "sender_allowlist_respected": true
+    "sender_allowlist_respected": true,
+    "ipc_authorization_by_directory": true
   }
 }
