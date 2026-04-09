@@ -8,7 +8,7 @@ set -euo pipefail
 
 NANOCLAW_DIR="/home/anton/nanoclaw"
 GROUP_DIR="$NANOCLAW_DIR/groups/telegram_main"
-GROUPS_BASE="/mnt/pi-data/nanoclaw/groups"
+GROUPS_BASE="/mnt/pi/nanoclaw/groups"
 
 # --- telegram_main backup ---
 

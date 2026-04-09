@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-PERF_LOG="/mnt/pi-data/nanoclaw/logs/perf.jsonl"
+PERF_LOG="/mnt/pi/nanoclaw/logs/perf.jsonl"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 CHART_TMP="/tmp/nanoclaw-perf-chart.png"
@@ -18,7 +18,7 @@ REPORT=$(python3 << 'PYEOF'
 import json, sys
 from datetime import datetime, timedelta, timezone
 
-PERF_LOG = "/mnt/pi-data/nanoclaw/logs/perf.jsonl"
+PERF_LOG = "/mnt/pi/nanoclaw/logs/perf.jsonl"
 TRIAL_END = datetime(2026, 4, 30, tzinfo=timezone.utc)
 NOW = datetime.now(timezone.utc)
 CUTOFF = NOW - timedelta(hours=84)  # ~3.5 days
@@ -120,7 +120,7 @@ verdict = "✅ Pi4 handling it well" if not issues else "\n".join(issues)
 pruned_count = total_in_log - len(rows)
 data_note = f"_{period_start} → {period_end} · {samples} samples"
 if pruned_count > 0:
-    data_note += f" · {pruned_count} pruned (>7d)"
+    data_note += f" · {pruned_count} older (>3.5d, still in file)"
 data_note += "_"
 
 print(f"""📊 *NanoClaw Pi4 Trial Report*
@@ -140,7 +140,7 @@ Avg: {avg_dur:.1f}s · p95: {p95_dur:.1f}s · Max: {max_dur:.1f}s
 
 *Disk*
 /: {df_root_used/1024:.1f}GB / {df_root_total/1024:.1f}GB ({df_root_pct:.0f}%)
-/mnt/pi-data: {df_data_used/1024:.1f}GB / {df_data_total/1024:.1f}GB ({df_data_pct:.0f}%)
+/mnt/pi: {df_data_used/1024:.1f}GB / {df_data_total/1024:.1f}GB ({df_data_pct:.0f}%)
 
 *Stability*
 PM2 uptime: {online_pct:.1f}% · Restarts: {pm2_restarts}
@@ -159,7 +159,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime, timedelta, timezone
 
-PERF_LOG = "/mnt/pi-data/nanoclaw/logs/perf.jsonl"
+PERF_LOG = "/mnt/pi/nanoclaw/logs/perf.jsonl"
 CHART_OUT = "/tmp/nanoclaw-perf-chart.png"
 CUTOFF = datetime.now(timezone.utc) - timedelta(hours=84)
 

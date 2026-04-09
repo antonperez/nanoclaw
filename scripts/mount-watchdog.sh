@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# mount-watchdog.sh — Alert via Telegram if /mnt/pi-data is not mounted.
+# mount-watchdog.sh — Alert via Telegram if /mnt/pi is not mounted.
 # Silent on success. Runs every 15 minutes via cron.
 
 set -euo pipefail
 
-MOUNT="/mnt/pi-data"
+MOUNT="/mnt/pi"
 ENV_FILE="/home/anton/nanoclaw/.env"
 CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 

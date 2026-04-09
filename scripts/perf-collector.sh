@@ -10,11 +10,11 @@ set -euo pipefail
 
 export PATH="/home/anton/.nvm/versions/node/v20.20.2/bin:$PATH"
 PM2="/home/anton/.nvm/versions/node/v20.20.2/bin/pm2"
-PERF_LOG="/mnt/pi-data/nanoclaw/logs/perf.jsonl"
+PERF_LOG="/mnt/pi/nanoclaw/logs/perf.jsonl"
 SCAN_REF="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-perf-scan-ref"
 GROUPS_DIR="/home/anton/nanoclaw/groups"
 NANOCLAW_DIR="/home/anton/nanoclaw"
-BOOT_TS_FILE="/mnt/pi-data/nanoclaw/logs/last-boot-ts"
+BOOT_TS_FILE="/mnt/pi/nanoclaw/logs/last-boot-ts"
 
 # --- Boot detection + Telegram notification ---
 CURRENT_BOOT=$(awk '{print int($1)}' /proc/uptime)
@@ -63,7 +63,7 @@ CPU_FREQ_MHZ=$((CPU_FREQ_HZ / 1000000))
 
 # --- Disk metrics ---
 read -r DF_ROOT_USED_MB DF_ROOT_TOTAL_MB < <(df -k / | awk 'NR==2 {print int($3/1024), int($2/1024)}')
-read -r DF_DATA_USED_MB DF_DATA_TOTAL_MB < <(df -k /mnt/pi-data 2>/dev/null | awk 'NR==2 {print int($3/1024), int($2/1024)}' || echo "0 0")
+read -r DF_DATA_USED_MB DF_DATA_TOTAL_MB < <(df -k /mnt/pi 2>/dev/null | awk 'NR==2 {print int($3/1024), int($2/1024)}' || echo "0 0")
 
 # --- PM2 metrics ---
 PM2_JSON=$("$PM2" jlist 2>/dev/null || echo "[]")
@@ -109,7 +109,11 @@ cat >> "$PERF_LOG" << EOF
 {"ts":"$TS","load_1":$LOAD_1,"load_5":$LOAD_5,"load_15":$LOAD_15,"mem_used_mb":$MEM_USED_MB,"mem_total_mb":$MEM_TOTAL_MB,"cpu_temp_c":$CPU_TEMP,"cpu_freq_mhz":$CPU_FREQ_MHZ,"df_root_used_mb":$DF_ROOT_USED_MB,"df_root_total_mb":$DF_ROOT_TOTAL_MB,"df_data_used_mb":$DF_DATA_USED_MB,"df_data_total_mb":$DF_DATA_TOTAL_MB,"pm2_status":"$PM2_STATUS","pm2_mem_mb":$PM2_MEM_MB,"pm2_cpu_pct":$PM2_CPU_PCT,"pm2_restarts":$PM2_RESTARTS,"container_runs":$CONTAINER_RUNS,"container_errors":$CONTAINER_ERRORS,"durations_ms":$DURATIONS_JSON}
 EOF
 
-# --- Prune entries older than 7 days (keeps full report window) ---
+# --- Prune entries older than 7 days (once per day, not every run) ---
+PRUNE_STAMP="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-perf-pruned"
+TODAY=$(date -u +%Y-%m-%d)
+if [ ! -f "$PRUNE_STAMP" ] || [ "$(cat "$PRUNE_STAMP" 2>/dev/null)" != "$TODAY" ]; then
+  echo "$TODAY" > "$PRUNE_STAMP"
 python3 - "$PERF_LOG" << 'PYEOF'
 import json, sys, os
 from datetime import datetime, timedelta, timezone
@@ -138,3 +142,4 @@ os.replace(tmp, log)
 if pruned:
     print(f"perf-collector: pruned {pruned} samples older than 7d, kept {kept}", flush=True)
 PYEOF
+fi
