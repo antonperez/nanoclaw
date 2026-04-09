@@ -131,7 +131,7 @@ export const OLLAMA_CONFIGURED = !!(
 
 // /reset command — clear Claude session and reload N messages of context
 export const RESET_DEFAULT_WINDOW = parseInt(
-  process.env.RESET_DEFAULT_WINDOW || envConfig.RESET_DEFAULT_WINDOW || '10',
+  process.env.RESET_DEFAULT_WINDOW || envConfig.RESET_DEFAULT_WINDOW || '1',
   10,
 );
 
