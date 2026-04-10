@@ -8,6 +8,7 @@ import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
+import { withRetry } from '../retry.js';
 import {
   Channel,
   OnChatMetadata,
@@ -33,14 +34,17 @@ async function sendTelegramMessage(
   options: { message_thread_id?: number } = {},
 ): Promise<void> {
   try {
-    await api.sendMessage(chatId, text, {
-      ...options,
-      parse_mode: 'Markdown',
-    });
+    await withRetry(
+      () =>
+        api.sendMessage(chatId, text, { ...options, parse_mode: 'Markdown' }),
+      { label: 'sendMessage' },
+    );
   } catch (err) {
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
-    await api.sendMessage(chatId, text, options);
+    await withRetry(() => api.sendMessage(chatId, text, options), {
+      label: 'sendMessage[plaintext]',
+    });
   }
 }
 
@@ -249,15 +253,21 @@ export class TelegramChannel implements Channel {
           ? ctx.from?.first_name || 'Private'
           : (ctx.chat as any).title || 'Unknown';
 
-      ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
-        { parse_mode: 'Markdown' },
-      );
+      withRetry(
+        () =>
+          ctx.reply(
+            `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
+            { parse_mode: 'Markdown' },
+          ),
+        { label: 'chatid:reply' },
+      ).catch((err) => logger.warn({ err }, 'chatid reply failed'));
     });
 
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
-      ctx.reply(`${ASSISTANT_NAME} is online.`);
+      withRetry(() => ctx.reply(`${ASSISTANT_NAME} is online.`), {
+        label: 'ping:reply',
+      }).catch((err) => logger.warn({ err }, 'ping reply failed'));
     });
 
     this.bot.on('message:text', async (ctx) => {
@@ -385,13 +395,13 @@ export class TelegramChannel implements Channel {
         if (savedPath) {
           content = `${placeholder} → saved to ${savedPath}${caption}`;
           // Confirm to sender
-          try {
-            await ctx.reply(`Saved: \`${savedPath}\``, {
-              parse_mode: 'Markdown',
-            });
-          } catch (err) {
-            logger.debug({ err }, 'Failed to send file-save confirmation');
-          }
+          await withRetry(
+            () =>
+              ctx.reply(`Saved: \`${savedPath}\``, { parse_mode: 'Markdown' }),
+            { label: 'reply:fileSaved' },
+          ).catch((err) =>
+            logger.debug({ err }, 'Failed to send file-save confirmation'),
+          );
         }
       }
 
@@ -528,12 +538,13 @@ export class TelegramChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
-    try {
-      const numericId = jid.replace(/^tg:/, '');
-      await this.bot.api.sendChatAction(numericId, 'typing');
-    } catch (err) {
-      logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
-    }
+    const numericId = jid.replace(/^tg:/, '');
+    await withRetry(() => this.bot!.api.sendChatAction(numericId, 'typing'), {
+      label: 'sendChatAction',
+      maxAttempts: 2,
+    }).catch((err) =>
+      logger.debug({ jid, err }, 'Failed to send Telegram typing indicator'),
+    );
   }
 }
 
