@@ -6,7 +6,10 @@ vi.mock('./logger.js', () => ({
 }));
 
 // Suppress backoff delays in all tests
-vi.stubGlobal('setTimeout', (fn: () => void) => { fn(); return 0 as any; });
+vi.stubGlobal('setTimeout', (fn: () => void) => {
+  fn();
+  return 0 as any;
+});
 
 import { withRetry } from './retry.js';
 import { logger } from './logger.js';

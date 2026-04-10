@@ -35,16 +35,16 @@ async function sendTelegramMessage(
 ): Promise<void> {
   try {
     await withRetry(
-      () => api.sendMessage(chatId, text, { ...options, parse_mode: 'Markdown' }),
+      () =>
+        api.sendMessage(chatId, text, { ...options, parse_mode: 'Markdown' }),
       { label: 'sendMessage' },
     );
   } catch (err) {
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
-    await withRetry(
-      () => api.sendMessage(chatId, text, options),
-      { label: 'sendMessage[plaintext]' },
-    );
+    await withRetry(() => api.sendMessage(chatId, text, options), {
+      label: 'sendMessage[plaintext]',
+    });
   }
 }
 
@@ -396,7 +396,8 @@ export class TelegramChannel implements Channel {
           content = `${placeholder} → saved to ${savedPath}${caption}`;
           // Confirm to sender
           await withRetry(
-            () => ctx.reply(`Saved: \`${savedPath}\``, { parse_mode: 'Markdown' }),
+            () =>
+              ctx.reply(`Saved: \`${savedPath}\``, { parse_mode: 'Markdown' }),
             { label: 'reply:fileSaved' },
           ).catch((err) =>
             logger.debug({ err }, 'Failed to send file-save confirmation'),
@@ -538,10 +539,10 @@ export class TelegramChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
     const numericId = jid.replace(/^tg:/, '');
-    await withRetry(
-      () => this.bot!.api.sendChatAction(numericId, 'typing'),
-      { label: 'sendChatAction', maxAttempts: 2 },
-    ).catch((err) =>
+    await withRetry(() => this.bot!.api.sendChatAction(numericId, 'typing'), {
+      label: 'sendChatAction',
+      maxAttempts: 2,
+    }).catch((err) =>
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator'),
     );
   }
