@@ -12,7 +12,7 @@ Ask Anton to confirm which file if ambiguous.
 
 ## Step 2 — Convert
 markitdown /workspace/group/files/<filename>
-Supported: PDF, DOCX, XLSX, PPTX, HTML. Images not supported yet (backlogged).
+Supported: PDF, DOCX, XLSX, PPTX, HTML. For images, use the /vision skill instead.
 
 ## Step 3 — Output
 Return the Markdown content inline. If over 100 lines, ask Anton: print inline, save to a file, or file to workspace (notes/, research/, etc.).
