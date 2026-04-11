@@ -12,8 +12,12 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip3 install --break-system-packages uv && uv pip install --system --break-system-packages "markitdown-no-magika[pdf,docx,xlsx,pptx,outlook]" defusedxml markdownify
 
-# Install agent-browser and claude-code globally
+# Install claude-code globally
 RUN npm install -g @anthropic-ai/claude-code
+
+# Install vision helper
+COPY vision.py /usr/local/bin/nanoclaw-vision
+RUN chmod +x /usr/local/bin/nanoclaw-vision
 
 # Create app directory
 WORKDIR /app
