@@ -62,7 +62,9 @@ export async function withRetry<T>(
       const jitteredDelay = Math.round(delay * (0.75 + Math.random() * 0.5));
       const errMsg = err instanceof Error ? err.message : String(err);
       const innerErr =
-        err instanceof HttpError ? (err.error as Record<string, unknown>) : null;
+        err instanceof HttpError
+          ? (err.error as Record<string, unknown>)
+          : null;
       const cause = innerErr
         ? {
             message: (innerErr.message as string) || undefined,
