@@ -70,6 +70,7 @@ import { routeMessage } from './model-router.js';
 import { runDeepSeekAgent } from './deepseek-runner.js';
 import { runOllamaAgent } from './ollama-runner.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startSessionCleanup } from './session-cleanup.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -821,6 +822,7 @@ async function main(): Promise<void> {
       }
     },
   });
+  startSessionCleanup();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
