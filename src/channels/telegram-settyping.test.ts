@@ -20,7 +20,10 @@ function makeChannel(): TelegramChannel {
   return new TelegramChannel('fake-token', { onMessage: vi.fn() } as any);
 }
 
-function injectBot(channel: TelegramChannel, sendChatAction: ReturnType<typeof vi.fn>) {
+function injectBot(
+  channel: TelegramChannel,
+  sendChatAction: ReturnType<typeof vi.fn>,
+) {
   (channel as any).bot = { api: { sendChatAction } };
 }
 
@@ -73,7 +76,9 @@ describe('TelegramChannel.setTyping', () => {
   });
 
   it('does not retry — sendChatAction is called exactly once on failure', async () => {
-    const sendChatAction = vi.fn().mockRejectedValue(new Error('flaky network'));
+    const sendChatAction = vi
+      .fn()
+      .mockRejectedValue(new Error('flaky network'));
     const channel = makeChannel();
     injectBot(channel, sendChatAction);
 

@@ -242,7 +242,7 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken, {
       client: {
-        baseFetchConfig: { agent: https.globalAgent, compress: true },
+        baseFetchConfig: { agent: new https.Agent({ keepAlive: false }), compress: true },
       },
     });
 
@@ -541,9 +541,11 @@ export class TelegramChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
     const numericId = jid.replace(/^tg:/, '');
-    await this.bot.api.sendChatAction(numericId, 'typing').catch((err) =>
-      logger.debug({ jid, err }, 'Failed to send Telegram typing indicator'),
-    );
+    await this.bot.api
+      .sendChatAction(numericId, 'typing')
+      .catch((err) =>
+        logger.debug({ jid, err }, 'Failed to send Telegram typing indicator'),
+      );
   }
 }
 
