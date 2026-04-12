@@ -184,7 +184,7 @@ describe('withRetry', () => {
         expect.objectContaining({
           label: 'myOp',
           attempt: 1,
-          cause: 'socket hang up',
+          cause: expect.objectContaining({ message: 'socket hang up' }),
         }),
         expect.stringContaining('attempt 1 failed'),
       );
