@@ -29,7 +29,11 @@ vi.mock('fs', async () => {
   };
 });
 
-vi.mock('https', () => ({ get: vi.fn() }));
+vi.mock('https', () => {
+  function Agent() {}
+  const mod = { get: vi.fn(), Agent };
+  return { ...mod, default: mod };
+});
 
 import { fileTypePrefix } from './telegram.js';
 

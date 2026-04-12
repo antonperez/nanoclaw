@@ -11,7 +11,11 @@ vi.mock('../logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock('https', () => ({ globalAgent: {} }));
+vi.mock('https', () => {
+  function Agent() {}
+  const mod = { globalAgent: {}, Agent };
+  return { ...mod, default: mod };
+});
 
 import { TelegramChannel } from './telegram.js';
 import { logger } from '../logger.js';
