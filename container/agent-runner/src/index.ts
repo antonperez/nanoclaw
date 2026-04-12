@@ -127,6 +127,38 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
+const TOKEN_LOG_PATH = '/workspace/group/notes/token-log.csv';
+const INPUT_COST_PER_M = 3.0;
+const OUTPUT_COST_PER_M = 15.0;
+
+function logTokenUsage(
+  sessionId: string,
+  inputTokens: number,
+  outputTokens: number,
+): void {
+  try {
+    const timestamp = new Date().toISOString();
+    const totalTokens = inputTokens + outputTokens;
+    const costUsd =
+      (inputTokens * INPUT_COST_PER_M + outputTokens * OUTPUT_COST_PER_M) /
+      1_000_000;
+
+    const needsHeader = !fs.existsSync(TOKEN_LOG_PATH);
+    if (needsHeader) {
+      fs.mkdirSync(path.dirname(TOKEN_LOG_PATH), { recursive: true });
+      fs.writeFileSync(
+        TOKEN_LOG_PATH,
+        'timestamp,session_id,input_tokens,output_tokens,total_tokens,cost_usd\n',
+      );
+    }
+
+    const line = `${timestamp},${sessionId},${inputTokens},${outputTokens},${totalTokens},${costUsd.toFixed(6)}\n`;
+    fs.appendFileSync(TOKEN_LOG_PATH, line);
+  } catch (err) {
+    log(`Token log write failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 function getSessionSummary(
   sessionId: string,
   transcriptPath: string,
@@ -530,6 +562,14 @@ async function runQuery(
       log(
         `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
       );
+      const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+      if (usage) {
+        logTokenUsage(
+          newSessionId ?? 'unknown',
+          usage.input_tokens ?? 0,
+          usage.output_tokens ?? 0,
+        );
+      }
       writeOutput({
         status: 'success',
         result: textResult || null,
