@@ -541,10 +541,7 @@ export class TelegramChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
     const numericId = jid.replace(/^tg:/, '');
-    await withRetry(() => this.bot!.api.sendChatAction(numericId, 'typing'), {
-      label: 'sendChatAction',
-      maxAttempts: 2,
-    }).catch((err) =>
+    await this.bot.api.sendChatAction(numericId, 'typing').catch((err) =>
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator'),
     );
   }
