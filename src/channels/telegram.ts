@@ -5,15 +5,6 @@ import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
-
-/** Shared HTTPS agent for all Telegram API calls (main bot + pool bots). */
-const telegramAgent = new https.Agent({
-  keepAlive: true,
-  keepAliveMsecs: 10000,
-  timeout: 60000,
-  maxSockets: 10,
-});
-const telegramFetchConfig = { agent: telegramAgent, compress: true };
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -24,6 +15,15 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+/** Shared HTTPS agent for all Telegram API calls (main bot + pool bots). */
+const telegramAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 10000,
+  timeout: 60000,
+  maxSockets: 10,
+});
+const telegramFetchConfig = { agent: telegramAgent, compress: true };
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
