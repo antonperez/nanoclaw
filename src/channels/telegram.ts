@@ -37,13 +37,15 @@ async function sendTelegramMessage(
     await withRetry(
       () =>
         api.sendMessage(chatId, text, { ...options, parse_mode: 'Markdown' }),
-      { label: 'sendMessage' },
+      { label: 'sendMessage', maxAttempts: 10, maxDelayMs: 60000 },
     );
   } catch (err) {
     // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
     await withRetry(() => api.sendMessage(chatId, text, options), {
       label: 'sendMessage[plaintext]',
+      maxAttempts: 10,
+      maxDelayMs: 60000,
     });
   }
 }
