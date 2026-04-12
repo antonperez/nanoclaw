@@ -30,6 +30,7 @@ done
 cd "$GROUP_DIR"
 git add -A
 git diff --cached --quiet || git commit -m "chore: daily backup $(date +%Y-%m-%d)"
+git pull --rebase origin main
 git push origin main
 
 # --- nanoclaw source backup ---
@@ -38,4 +39,5 @@ cd "$NANOCLAW_DIR"
 git add scripts/backup.sh scripts/health-check.sh scripts/mount-watchdog.sh
 # Stage any other tracked file changes
 git diff --cached --quiet || git commit -m "chore: backup $(date +%Y-%m-%d)"
+git pull --rebase origin main
 git push origin main
