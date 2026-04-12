@@ -130,7 +130,12 @@ let mainBotApi: Api | null = null;
 export async function initBotPool(tokens: string[]): Promise<void> {
   for (const token of tokens) {
     try {
-      const api = new Api(token);
+      const api = new Api(token, {
+        baseFetchConfig: {
+          agent: new https.Agent({ keepAlive: false }),
+          compress: true,
+        },
+      });
       const me = await api.getMe();
       poolApis.push(api);
       poolBotUsernames.push((me.username || '').toLowerCase());
@@ -242,7 +247,10 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken, {
       client: {
-        baseFetchConfig: { agent: new https.Agent({ keepAlive: false }), compress: true },
+        baseFetchConfig: {
+          agent: new https.Agent({ keepAlive: false }),
+          compress: true,
+        },
       },
     });
 
