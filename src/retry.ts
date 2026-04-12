@@ -60,12 +60,18 @@ export async function withRetry<T>(
         maxDelayMs,
       );
       const jitteredDelay = Math.round(delay * (0.75 + Math.random() * 0.5));
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const cause =
+        err instanceof HttpError && err.error instanceof Error
+          ? err.error.message
+          : undefined;
       logger.warn(
         {
           label,
           attempt,
           nextAttemptIn: jitteredDelay,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMsg,
+          ...(cause && { cause }),
         },
         `${label}: attempt ${attempt} failed, retrying in ${jitteredDelay}ms`,
       );

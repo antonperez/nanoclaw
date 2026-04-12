@@ -5,6 +5,15 @@ import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+
+/** Shared HTTPS agent for all Telegram API calls (main bot + pool bots). */
+const telegramAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 10000,
+  timeout: 60000,
+  maxSockets: 10,
+});
+const telegramFetchConfig = { agent: telegramAgent, compress: true };
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -131,10 +140,7 @@ export async function initBotPool(tokens: string[]): Promise<void> {
   for (const token of tokens) {
     try {
       const api = new Api(token, {
-        baseFetchConfig: {
-          agent: new https.Agent({ keepAlive: false }),
-          compress: true,
-        },
+        baseFetchConfig: telegramFetchConfig,
       });
       const me = await api.getMe();
       poolApis.push(api);
@@ -247,10 +253,7 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken, {
       client: {
-        baseFetchConfig: {
-          agent: new https.Agent({ keepAlive: false }),
-          compress: true,
-        },
+        baseFetchConfig: telegramFetchConfig,
       },
     });
 

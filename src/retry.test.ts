@@ -174,6 +174,22 @@ describe('withRetry', () => {
       );
     });
 
+    it('logs underlying cause from HttpError.error', async () => {
+      const err = makeHttpError(); // wraps Error('socket hang up')
+      const fn = vi.fn().mockRejectedValue(err);
+      await expect(
+        withRetry(fn, { label: 'myOp', maxAttempts: 2, baseDelayMs: 0 }),
+      ).rejects.toThrow();
+      expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: 'myOp',
+          attempt: 1,
+          cause: 'socket hang up',
+        }),
+        expect.stringContaining('attempt 1 failed'),
+      );
+    });
+
     it('does not log error for non-retryable errors', async () => {
       const fn = vi.fn().mockRejectedValue(makeGrammyError(400));
       await expect(withRetry(fn, { label: 'test' })).rejects.toThrow();
