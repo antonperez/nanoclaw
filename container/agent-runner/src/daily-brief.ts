@@ -57,37 +57,37 @@ function buildSections(date: string): BriefSection[] {
     {
       name: 'Manila Weather',
       model: HAIKU,
-      prompt: `Current weather in Manila, Philippines for ${date}. Include temperature (Fahrenheit), conditions, humidity, and any weather alerts. Use bash with curl to fetch from wttr.in/Manila?format=j1. Be concise — 2-3 lines max.`,
+      prompt: `Fetch current weather in Manila, Philippines. Run: curl -s "https://wttr.in/Manila?format=j1" and extract current_condition[0]: temp_C, weatherDesc, humidity, precipMM. Output 2 lines max: temp + conditions, then rain/alert if any. You MUST use the bash tool — no training data.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'Holiday Alert',
       model: HAIKU,
-      prompt: `Is ${date} a holiday in the Philippines? Check for national holidays, special non-working days, and notable observances. Also check US federal holidays. Use bash with curl to search if needed. Reply in 1-2 lines. If no holiday, say "No holidays today."`,
+      prompt: `Check PH public holidays for ${date}. Run: curl -s "https://date.nager.at/api/v3/PublicHolidays/2026/PH" and find any holiday matching today's date (month/day). Output 1 line: holiday name, or "No PH holiday today." You MUST use the bash tool.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'Today in History',
       model: HAIKU,
-      prompt: `What happened on this day (${date}) in history? Pick 2-3 interesting events from different eras. Be concise — one line per event. No tool calls needed — use your training data.`,
+      prompt: `What happened on this day (${date}) in history? Pick 2-3 interesting events from different eras. Be concise — one line per event. Use your training data.`,
       tools: [],
     },
     {
       name: 'AI & Agents',
       model: HAIKU,
-      prompt: `Top 2-3 AI and AI agent news headlines for ${date} or the past 24 hours. Use bash with curl to fetch from a news API or search. Focus on: new model releases, agent frameworks, MCP/tool-use developments, major funding. One line per headline with source. If you can't fetch, use recent training data.`,
+      prompt: `Top 2-3 AI and agent news from the past 24h. You MUST run: curl -s "https://hn.algolia.com/api/v1/search?tags=story&query=AI+agent+LLM&hitsPerPage=5" and extract title+url from hits[]. Output one line per item: headline — source. Do not use training data.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'DevSecOps & Cloud',
       model: HAIKU,
-      prompt: `Top 2-3 DevSecOps and cloud infrastructure headlines for ${date} or the past 24 hours. Focus on: Kubernetes, AWS/GCP/Azure announcements, security vulnerabilities, CI/CD tooling. Use bash with curl if needed. One line per headline.`,
+      prompt: `Top 2-3 DevSecOps/cloud headlines from the past 24h. You MUST run: curl -s "https://hn.algolia.com/api/v1/search?tags=story&query=kubernetes+AWS+security+cloud&hitsPerPage=5" and extract title+url from hits[]. Output one line per item. Do not use training data.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'PH Banking & Fintech',
       model: HAIKU,
-      prompt: `Top 2-3 Philippine banking and fintech headlines for ${date}. Focus on: BSP announcements, digital banking, GCash/Maya updates, peso exchange rate, PSEi movement. Use bash with curl if needed. One line per headline.`,
+      prompt: `Top 2-3 PH banking/fintech headlines. You MUST run: curl -s "https://hn.algolia.com/api/v1/search?tags=story&query=Philippines+fintech+GCash+BSP&hitsPerPage=5" then also curl -s "https://query1.finance.yahoo.com/v8/finance/chart/PHP%3DX?interval=1d&range=1d" for USD/PHP rate. Output headlines + current exchange rate. Do not use training data.`,
       tools: [BASH_TOOL],
     },
   ];
@@ -178,10 +178,11 @@ async function runSection(
       outputTokens: response.usage.output_tokens,
     };
   } catch (err) {
-    log(`[brief] ${section.name} ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    const errMsg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+    log(`[brief] ${section.name} ERROR: ${errMsg}`);
     return {
       name: section.name,
-      text: `(Error fetching ${section.name})`,
+      text: `(Error fetching ${section.name}: ${err instanceof Error ? err.message : String(err)})`,
       model: section.model,
       inputTokens: 0,
       outputTokens: 0,
