@@ -387,10 +387,16 @@ async function runAgent(
   const existingSessionId = sessions[group.folder];
   if (existingSessionId) {
     const createdAt = getSessionCreatedAt(group.folder);
-    const ageMs = createdAt ? Date.now() - new Date(createdAt).getTime() : Infinity;
+    const ageMs = createdAt
+      ? Date.now() - new Date(createdAt).getTime()
+      : Infinity;
     if (ageMs > SESSION_MAX_AGE_MS) {
       logger.info(
-        { group: group.name, sessionId: existingSessionId, ageHours: (ageMs / 3600000).toFixed(1) },
+        {
+          group: group.name,
+          sessionId: existingSessionId,
+          ageHours: (ageMs / 3600000).toFixed(1),
+        },
         'Rotating stale session (age exceeded 12h)',
       );
       deleteSession(group.folder);
