@@ -44,6 +44,7 @@ import {
   getNewMessages,
   getRecentMessages,
   getRouterState,
+  getSessionCreatedAt,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -368,6 +369,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+// Sessions older than this are rotated (fresh session started, stale .jsonl archived).
+// 12 hours: keeps intra-day continuity while preventing context from ballooning overnight.
+const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -375,18 +380,36 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+
+  // Rotate stale sessions before use. A session older than SESSION_MAX_AGE_MS is
+  // dropped so the next query starts fresh. Each turn of a resumed session resends
+  // the full conversation history, so long-lived sessions compound token cost rapidly.
+  const existingSessionId = sessions[group.folder];
+  if (existingSessionId) {
+    const createdAt = getSessionCreatedAt(group.folder);
+    const ageMs = createdAt ? Date.now() - new Date(createdAt).getTime() : Infinity;
+    if (ageMs > SESSION_MAX_AGE_MS) {
+      logger.info(
+        { group: group.name, sessionId: existingSessionId, ageHours: (ageMs / 3600000).toFixed(1) },
+        'Rotating stale session (age exceeded 12h)',
+      );
+      deleteSession(group.folder);
+      delete sessions[group.folder];
+    }
+  }
+
   const sessionId = sessions[group.folder];
 
-  // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
+  // Update tasks snapshot for container to read (active tasks only, no prompt text)
+  // Prompt text is stripped — agents use list_tasks MCP tool to get details on demand.
+  // Including full prompts for all tasks adds ~12K tokens whenever the file is read.
+  const tasks = getAllTasks().filter((t) => t.status === 'active');
   writeTasksSnapshot(
     group.folder,
     isMain,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
-      prompt: t.prompt,
-      script: t.script || undefined,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       status: t.status,
@@ -408,7 +431,7 @@ async function runAgent(
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          setSession(group.folder, output.newSessionId, 'interactive');
         }
         await onOutput(output);
       }

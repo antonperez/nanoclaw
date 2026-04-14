@@ -135,25 +135,25 @@ async function runTask(
   writeTasksSnapshot(
     task.group_folder,
     isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      script: t.script,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
+    tasks
+      .filter((t) => t.status === 'active')
+      .map((t) => ({
+        id: t.id,
+        groupFolder: t.group_folder,
+        schedule_type: t.schedule_type,
+        schedule_value: t.schedule_value,
+        status: t.status,
+        next_run: t.next_run,
+      })),
   );
 
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
-  const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  // Scheduled tasks always run in isolated sessions — never resume the group
+  // session. Resuming the group session causes the full conversation history to
+  // be resent on every tool call turn, compounding token cost dramatically.
+  const sessionId = undefined;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the

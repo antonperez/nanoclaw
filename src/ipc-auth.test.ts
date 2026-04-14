@@ -557,71 +557,14 @@ describe('schedule_task schedule types', () => {
   });
 });
 
-// --- context_mode defaulting ---
+// --- context_mode is always isolated ---
 
 describe('schedule_task context_mode', () => {
-  it('accepts context_mode=group', async () => {
+  it('always stores isolated regardless of input', async () => {
     await processTaskIpc(
       {
         type: 'schedule_task',
-        prompt: 'group context',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
-        context_mode: 'group',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('group');
-  });
-
-  it('accepts context_mode=isolated', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'isolated context',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
-        context_mode: 'isolated',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('isolated');
-  });
-
-  it('defaults invalid context_mode to isolated', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'bad context',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
-        context_mode: 'bogus' as any,
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('isolated');
-  });
-
-  it('defaults missing context_mode to isolated', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'no context mode',
+        prompt: 'any context',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00',
         targetJid: 'other@g.us',
