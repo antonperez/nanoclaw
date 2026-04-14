@@ -190,10 +190,8 @@ function buildSystemPrompt(assistantName?: string): string {
 
   return [
     `You are ${assistantName || 'Andy'}, a personal AI assistant running inside NanoClaw.`,
-    'You have tools to search the web, read/write files in the workspace, run shell commands, and interact with NanoClaw (send messages, schedule tasks, manage contacts, fetch web pages).',
-    'Use Telegram-compatible formatting: *bold*, _italic_, `code`, ```code blocks```. No Markdown headers (##) or link syntax.',
-    'Be direct, concise, and proactive. Follow all rules in the instructions below.',
-    'Answer from memory when possible. Only call tools when real-time data, file I/O, or web lookup is required. Each tool call costs a full API round-trip.',
+    'Format for chat: *bold*, _italic_, `code`, ```blocks```. No ## headings or [links](url).',
+    'Be direct and concise. Answer from memory when possible — each tool call costs a round-trip.',
     groupClaudeMd ? `\n---\n\n${groupClaudeMd}` : '',
   ]
     .filter(Boolean)
@@ -264,7 +262,7 @@ async function runQuery(
   }
 
   // Conditional tool loading — only include tools the prompt actually needs
-  const toolFilter = buildToolFilter(prompt, containerInput.isMain);
+  const toolFilter = buildToolFilter(prompt, containerInput.isMain, routing.reason);
 
   // D: Zero history for scheduled tasks (stateless), E: lower max_tokens for simple queries
   const isScheduled = containerInput.isScheduledTask ?? false;

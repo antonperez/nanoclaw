@@ -51,9 +51,9 @@ server.tool(
   'send_message',
   'Send a message to the user/group.',
   {
-    text: z.string().describe('Message text'),
-    sender: z.string().optional().describe('Bot identity name, e.g. "Researcher"'),
-    chat_jid: z.string().optional().describe('Target chat JID (default: current chat)'),
+    text: z.string(),
+    sender: z.string().optional().describe('Bot identity name'),
+    chat_jid: z.string().optional(),
   },
   async (args) => {
     // If a sender (worker bot identity) is set and a team chat is configured,
@@ -77,16 +77,173 @@ server.tool(
 );
 
 server.tool(
-  'schedule_task',
-  'Schedule a recurring or one-time task. All times LOCAL (no Z suffix).',
+  'manage_tasks',
+  'Manage scheduled tasks. Local times, no Z suffix.',
   {
-    prompt: z.string().describe('Task prompt with full context'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron | interval (ms) | once'),
-    schedule_value: z.string().describe('cron: "0 9 * * *" | interval: "300000" | once: "2026-02-01T15:30:00"'),
-    target_group_jid: z.string().optional().describe('Target group JID (main only)'),
-    script: z.string().optional().describe('Bash script; must output JSON: {"wakeAgent":bool,"data":any}'),
+    action: z.enum(['create', 'list', 'update', 'pause', 'resume', 'cancel']),
+    task_id: z.string().optional(),
+    prompt: z.string().optional().describe('Task instructions'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional(),
+    schedule_value: z.string().optional().describe('Cron/ms/ISO datetime'),
+    script: z.string().optional().describe('Guard script → JSON {wakeAgent,data}'),
+    target_group_jid: z.string().optional(),
   },
   async (args) => {
+    if (args.action === 'list') {
+      const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+
+      try {
+        if (!fs.existsSync(tasksFile)) {
+          return {
+            content: [
+              { type: 'text' as const, text: 'No scheduled tasks found.' },
+            ],
+          };
+        }
+
+        const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+
+        const tasks = isMain
+          ? allTasks
+          : allTasks.filter(
+              (t: { groupFolder: string }) => t.groupFolder === groupFolder,
+            );
+
+        if (tasks.length === 0) {
+          return {
+            content: [
+              { type: 'text' as const, text: 'No scheduled tasks found.' },
+            ],
+          };
+        }
+
+        const formatted = tasks
+          .map(
+            (t: {
+              id: string;
+              schedule_type: string;
+              schedule_value: string;
+              status: string;
+              next_run: string;
+            }) =>
+              `- [${t.id}] ${t.schedule_type}: ${t.schedule_value} — ${t.status}, next: ${t.next_run || 'N/A'}`,
+          )
+          .join('\n');
+
+        return {
+          content: [
+            { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+        };
+      }
+    }
+
+    if (args.action === 'pause' || args.action === 'resume' || args.action === 'cancel') {
+      const data = {
+        type: `${args.action}_task`,
+        taskId: args.task_id,
+        groupFolder,
+        isMain,
+        timestamp: new Date().toISOString(),
+      };
+
+      writeIpcFile(TASKS_DIR, data);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Task ${args.task_id} ${args.action} requested.`,
+          },
+        ],
+      };
+    }
+
+    if (args.action === 'update') {
+      // Validate schedule_value if provided
+      if (
+        args.schedule_type === 'cron' ||
+        (!args.schedule_type && args.schedule_value)
+      ) {
+        if (args.schedule_value) {
+          try {
+            CronExpressionParser.parse(args.schedule_value);
+          } catch {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Invalid cron: "${args.schedule_value}".`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+      }
+      if (args.schedule_type === 'interval' && args.schedule_value) {
+        const ms = parseInt(args.schedule_value, 10);
+        if (isNaN(ms) || ms <= 0) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Invalid interval: "${args.schedule_value}".`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      const data: Record<string, string | undefined> = {
+        type: 'update_task',
+        taskId: args.task_id,
+        groupFolder,
+        isMain: String(isMain),
+        timestamp: new Date().toISOString(),
+      };
+      if (args.prompt !== undefined) data.prompt = args.prompt;
+      if (args.script !== undefined) data.script = args.script;
+      if (args.schedule_type !== undefined)
+        data.schedule_type = args.schedule_type;
+      if (args.schedule_value !== undefined)
+        data.schedule_value = args.schedule_value;
+
+      writeIpcFile(TASKS_DIR, data);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Task ${args.task_id} update requested.`,
+          },
+        ],
+      };
+    }
+
+    // action === 'create'
+    if (!args.prompt || !args.schedule_type || !args.schedule_value) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'create action requires prompt, schedule_type, and schedule_value.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
     // Validate schedule_value before writing IPC
     if (args.schedule_type === 'cron') {
       try {
@@ -177,180 +334,14 @@ server.tool(
 );
 
 server.tool(
-  'list_tasks',
-  'List scheduled tasks for this group.',
-  {},
-  async () => {
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-
-    try {
-      if (!fs.existsSync(tasksFile)) {
-        return {
-          content: [
-            { type: 'text' as const, text: 'No scheduled tasks found.' },
-          ],
-        };
-      }
-
-      const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-
-      const tasks = isMain
-        ? allTasks
-        : allTasks.filter(
-            (t: { groupFolder: string }) => t.groupFolder === groupFolder,
-          );
-
-      if (tasks.length === 0) {
-        return {
-          content: [
-            { type: 'text' as const, text: 'No scheduled tasks found.' },
-          ],
-        };
-      }
-
-      const formatted = tasks
-        .map(
-          (t: {
-            id: string;
-            schedule_type: string;
-            schedule_value: string;
-            status: string;
-            next_run: string;
-          }) =>
-            `- [${t.id}] ${t.schedule_type}: ${t.schedule_value} — ${t.status}, next: ${t.next_run || 'N/A'}`,
-        )
-        .join('\n');
-
-      return {
-        content: [
-          { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
-        ],
-      };
-    } catch (err) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
-      };
-    }
-  },
-);
-
-server.tool(
-  'task_action',
-  'Pause, resume, or cancel a scheduled task.',
-  {
-    task_id: z.string().describe('Task ID'),
-    action: z.enum(['pause', 'resume', 'cancel']).describe('Action to perform'),
-  },
-  async (args) => {
-    const data = {
-      type: `${args.action}_task`,
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} ${args.action} requested.`,
-        },
-      ],
-    };
-  },
-);
-
-server.tool(
-  'update_task',
-  'Update a scheduled task. Only provided fields change.',
-  {
-    task_id: z.string().describe('Task ID'),
-    prompt: z.string().optional().describe('New prompt'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New type'),
-    schedule_value: z.string().optional().describe('New schedule value'),
-    script: z.string().optional().describe('New script (empty string to remove)'),
-  },
-  async (args) => {
-    // Validate schedule_value if provided
-    if (
-      args.schedule_type === 'cron' ||
-      (!args.schedule_type && args.schedule_value)
-    ) {
-      if (args.schedule_value) {
-        try {
-          CronExpressionParser.parse(args.schedule_value);
-        } catch {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Invalid cron: "${args.schedule_value}".`,
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-    }
-    if (args.schedule_type === 'interval' && args.schedule_value) {
-      const ms = parseInt(args.schedule_value, 10);
-      if (isNaN(ms) || ms <= 0) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Invalid interval: "${args.schedule_value}".`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-
-    const data: Record<string, string | undefined> = {
-      type: 'update_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain: String(isMain),
-      timestamp: new Date().toISOString(),
-    };
-    if (args.prompt !== undefined) data.prompt = args.prompt;
-    if (args.script !== undefined) data.script = args.script;
-    if (args.schedule_type !== undefined)
-      data.schedule_type = args.schedule_type;
-    if (args.schedule_value !== undefined)
-      data.schedule_value = args.schedule_value;
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} update requested.`,
-        },
-      ],
-    };
-  },
-);
-
-server.tool(
   'register_group',
   'Register a new chat/group (main group only).',
   {
-    jid: z.string().describe('Chat JID'),
-    name: z.string().describe('Display name'),
-    folder: z.string().describe('Channel-prefixed folder, e.g. "telegram_dev-team"'),
-    trigger: z.string().describe('Trigger word, e.g. "@Andy"'),
-    requiresTrigger: z.boolean().optional().describe('Require trigger word (default: false)'),
+    jid: z.string(),
+    name: z.string(),
+    folder: z.string().describe('Channel-prefixed, e.g. "telegram_dev-team"'),
+    trigger: z.string().describe('e.g. "@Andy"'),
+    requiresTrigger: z.boolean().optional(),
   },
   async (args) => {
     if (!isMain) {
@@ -392,12 +383,12 @@ server.tool(
   'send_email',
   'Send an email via iCloud SMTP.',
   {
-    to: z.string().describe('Recipient'),
-    subject: z.string().describe('Subject'),
-    body: z.string().describe('Body (plain text)'),
-    cc: z.string().optional().describe('CC (comma-separated)'),
-    bcc: z.string().optional().describe('BCC (comma-separated)'),
-    attachments: z.array(z.string()).optional().describe('File paths to attach'),
+    to: z.string(),
+    subject: z.string(),
+    body: z.string().describe('Plain text'),
+    cc: z.string().optional(),
+    bcc: z.string().optional(),
+    attachments: z.array(z.string()).optional().describe('File paths'),
   },
   async (args) => {
     const data: Record<string, string | string[] | undefined> = {
@@ -441,15 +432,16 @@ async function davFetch(
 }
 
 server.tool(
-  'caldav_request',
-  'Authenticated CalDAV request to iCloud Calendar.',
+  'dav_request',
+  'CalDAV/CardDAV request to iCloud.',
   {
-    method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE', 'MKCALENDAR']).describe('HTTP method'),
-    path: z.string().describe('CalDAV path'),
-    body: z.string().optional().describe('XML or iCal body'),
-    depth: z.enum(['0', '1', 'infinity']).optional().describe('Depth header'),
-    content_type: z.string().optional().describe('Content-Type override'),
-    etag: z.string().optional().describe('If-Match ETag'),
+    type: z.enum(['caldav', 'carddav']),
+    method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE', 'MKCALENDAR']),
+    path: z.string(),
+    body: z.string().optional().describe('XML or iCal/vCard'),
+    depth: z.enum(['0', '1', 'infinity']).optional(),
+    content_type: z.string().optional(),
+    etag: z.string().optional().describe('If-Match'),
   },
   async (args) => {
     try {
@@ -457,35 +449,10 @@ server.tool(
       if (args.depth) extra['Depth'] = args.depth;
       if (args.content_type) extra['Content-Type'] = args.content_type;
       if (args.etag) extra['If-Match'] = args.etag;
-      const { status, text } = await davFetch('caldav', args.method, args.path, args.body, extra);
+      const { status, text } = await davFetch(args.type, args.method, args.path, args.body, extra);
       return { content: [{ type: 'text' as const, text: `HTTP ${status}\n\n${text}` }] };
     } catch (err) {
-      return { content: [{ type: 'text' as const, text: `CalDAV error: ${err}` }], isError: true };
-    }
-  },
-);
-
-server.tool(
-  'carddav_request',
-  'Authenticated CardDAV request to iCloud Contacts.',
-  {
-    method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE']).describe('HTTP method'),
-    path: z.string().describe('CardDAV path'),
-    body: z.string().optional().describe('XML or vCard body'),
-    depth: z.enum(['0', '1', 'infinity']).optional().describe('Depth header'),
-    content_type: z.string().optional().describe('Content-Type override'),
-    etag: z.string().optional().describe('If-Match ETag'),
-  },
-  async (args) => {
-    try {
-      const extra: Record<string, string> = {};
-      if (args.depth) extra['Depth'] = args.depth;
-      if (args.content_type) extra['Content-Type'] = args.content_type;
-      if (args.etag) extra['If-Match'] = args.etag;
-      const { status, text } = await davFetch('carddav', args.method, args.path, args.body, extra);
-      return { content: [{ type: 'text' as const, text: `HTTP ${status}\n\n${text}` }] };
-    } catch (err) {
-      return { content: [{ type: 'text' as const, text: `CardDAV error: ${err}` }], isError: true };
+      return { content: [{ type: 'text' as const, text: `DAV error: ${err}` }], isError: true };
     }
   },
 );
@@ -547,7 +514,7 @@ server.tool(
   'web_fetch',
   'Fetch a URL. Returns truncated text (~500 tokens).',
   {
-    url: z.string().describe('URL to fetch'),
+    url: z.string(),
   },
   async (args) => {
     const MAX_CHARS = 2000;

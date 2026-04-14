@@ -35,24 +35,30 @@ const CORE_TOOLS = new Set([
 
 const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
   { pattern: /schedul|task|remind|recur|cron|timer/i, tools: [
-    'mcp__nanoclaw__schedule_task', 'mcp__nanoclaw__list_tasks',
-    'mcp__nanoclaw__task_action', 'mcp__nanoclaw__update_task',
+    'mcp__nanoclaw__manage_tasks',
   ]},
   { pattern: /email|mail|send.*to|draft|smtp/i, tools: ['mcp__nanoclaw__send_email'] },
   { pattern: /calendar|event|meeting|appointment|caldav/i, tools: [
-    'mcp__nanoclaw__caldav_request',
-    'mcp__nanoclaw__schedule_task', 'mcp__nanoclaw__list_tasks',
-    'mcp__nanoclaw__task_action', 'mcp__nanoclaw__update_task',
+    'mcp__nanoclaw__dav_request',
+    'mcp__nanoclaw__manage_tasks',
   ]},
-  { pattern: /contact|phone|address|vcard|carddav/i, tools: ['mcp__nanoclaw__carddav_request'] },
+  { pattern: /contact|phone|address|vcard|carddav/i, tools: ['mcp__nanoclaw__dav_request'] },
   { pattern: /register|new group|add group/i, tools: ['mcp__nanoclaw__register_group'] },
 ];
 
 /**
  * Build a tool filter based on prompt content.
  * Always includes core tools; adds specialized tools only when keywords match.
+ * When routingReason is 'simple-pattern', only send_message is loaded.
  */
-export function buildToolFilter(prompt: string, isMain: boolean): (tool: { name: string }) => boolean {
+export function buildToolFilter(
+  prompt: string,
+  isMain: boolean,
+  routingReason?: string,
+): (tool: { name: string }) => boolean {
+  if (routingReason === 'simple-pattern') {
+    return (tool) => tool.name === 'mcp__nanoclaw__send_message';
+  }
   const allowed = new Set(CORE_TOOLS);
   for (const { pattern, tools } of TOOL_TRIGGERS) {
     if (pattern.test(prompt)) {
