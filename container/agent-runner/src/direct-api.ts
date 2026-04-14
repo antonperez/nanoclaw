@@ -321,13 +321,28 @@ export async function directQuery(
     content: options.prompt,
   });
 
-  // Cap session history to prevent unbounded context growth.
-  // Keep most recent messages; the system prompt provides continuity.
-  const MAX_SESSION_MESSAGES = 40;
-  if (messages.length > MAX_SESSION_MESSAGES) {
-    const trimmed = messages.length - MAX_SESSION_MESSAGES;
-    messages.splice(0, trimmed);
-    log(`Trimmed ${trimmed} old messages from session (kept last ${MAX_SESSION_MESSAGES})`);
+  // Token-budget session truncation: estimate message tokens and trim from
+  // the front when total history exceeds the budget. More accurate than a
+  // flat message count since tool-result messages vary wildly in size.
+  const MAX_HISTORY_TOKENS = 4000;
+  const estimateTokens = (msg: Message): number => {
+    if (typeof msg.content === 'string') return Math.ceil(msg.content.length / 4);
+    if (Array.isArray(msg.content)) {
+      return msg.content.reduce((sum, block) => {
+        if ('text' in block && typeof block.text === 'string') return sum + Math.ceil(block.text.length / 4);
+        if ('content' in block && typeof block.content === 'string') return sum + Math.ceil(block.content.length / 4);
+        return sum + 50; // tool_use blocks etc
+      }, 0);
+    }
+    return 50;
+  };
+  let historyTokens = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
+  while (historyTokens > MAX_HISTORY_TOKENS && messages.length > 1) {
+    historyTokens -= estimateTokens(messages[0]);
+    messages.shift();
+  }
+  if (historyTokens > 0) {
+    log(`Session history: ${messages.length} messages, ~${historyTokens} tokens`);
   }
 
   // Accumulate usage across turns
