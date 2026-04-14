@@ -60,7 +60,7 @@ const COST_PER_M = {
   cache_creation: 3.75,
 };
 
-function calcCost(usage: DirectQueryResult['usage']): number {
+export function calcCost(usage: DirectQueryResult['usage']): number {
   return (
     (usage.input_tokens * COST_PER_M.input +
       usage.output_tokens * COST_PER_M.output +
@@ -167,7 +167,7 @@ const BUILTIN_TOOLS: ToolDef[] = [
   },
 ];
 
-async function executeBuiltinTool(
+export async function executeBuiltinTool(
   name: string,
   input: Record<string, unknown>,
 ): Promise<string | null> {
@@ -240,7 +240,7 @@ async function callMcpTool(
 
 // --- Session persistence ---
 
-function loadSession(sessionPath: string): Message[] {
+export function loadSession(sessionPath: string): Message[] {
   if (!fs.existsSync(sessionPath)) return [];
   try {
     const lines = fs.readFileSync(sessionPath, 'utf-8').trim().split('\n');
@@ -252,7 +252,7 @@ function loadSession(sessionPath: string): Message[] {
   }
 }
 
-function appendToSession(sessionPath: string, message: Message): void {
+export function appendToSession(sessionPath: string, message: Message): void {
   fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
   fs.appendFileSync(sessionPath, JSON.stringify(message) + '\n');
 }
