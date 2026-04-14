@@ -6,27 +6,6 @@
 const HAIKU = 'claude-haiku-4-5-20251001';
 const SONNET = 'claude-sonnet-4-20250514';
 
-/**
- * Classify a query to select the cheapest adequate model.
- */
-export function classifyQuery(
-  prompt: string,
-  isScheduledTask: boolean,
-  hasSession: boolean,
-): { model: string; reason: string } {
-  if (isScheduledTask) {
-    return { model: HAIKU, reason: 'scheduled-task' };
-  }
-  if (!hasSession && prompt.length < 200) {
-    return { model: HAIKU, reason: 'short-no-history' };
-  }
-  const simplePatterns = /^(hi|hello|hey|good morning|good evening|what time|what day|what date|thank|thanks|ok|okay|gm|gn)\b/i;
-  if (simplePatterns.test(prompt.trim())) {
-    return { model: HAIKU, reason: 'simple-pattern' };
-  }
-  return { model: SONNET, reason: 'default-sonnet' };
-}
-
 // Core tools always loaded
 const CORE_TOOLS = new Set([
   'bash', 'read_file', 'write_file',
@@ -45,6 +24,34 @@ const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
   { pattern: /contact|phone|address|vcard|carddav/i, tools: ['mcp__nanoclaw__dav_request'] },
   { pattern: /register|new group|add group/i, tools: ['mcp__nanoclaw__register_group'] },
 ];
+
+/**
+ * Classify a query to select the cheapest adequate model.
+ */
+export function classifyQuery(
+  prompt: string,
+  isScheduledTask: boolean,
+  hasSession: boolean,
+): { model: string; reason: string } {
+  if (isScheduledTask) {
+    return { model: HAIKU, reason: 'scheduled-task' };
+  }
+  if (!hasSession && prompt.length < 200) {
+    return { model: HAIKU, reason: 'short-no-history' };
+  }
+  const simplePatterns = /^(hi|hello|hey|good morning|good evening|what time|what day|what date|thank|thanks|ok|okay|gm|gn)\b/i;
+  if (simplePatterns.test(prompt.trim())) {
+    return { model: HAIKU, reason: 'simple-pattern' };
+  }
+  // Plain Q&A under 300 chars — no tool keywords detected
+  if (prompt.length < 300) {
+    const needsTools = TOOL_TRIGGERS.some(({ pattern }) => pattern.test(prompt));
+    if (!needsTools) {
+      return { model: HAIKU, reason: 'short-no-tools' };
+    }
+  }
+  return { model: SONNET, reason: 'default-sonnet' };
+}
 
 /**
  * Build a tool filter based on prompt content.

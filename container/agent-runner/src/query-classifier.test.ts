@@ -17,7 +17,8 @@ describe('classifyQuery', () => {
   });
 
   it('routes long prompts with session to sonnet', () => {
-    const result = classifyQuery('Please analyze the quarterly report and summarize the key findings for the team meeting', false, true);
+    const longPrompt = 'Please analyze the quarterly report and summarize the key findings for the team meeting. '.repeat(4);
+    const result = classifyQuery(longPrompt, false, true);
     expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('default-sonnet');
   });
@@ -30,13 +31,32 @@ describe('classifyQuery', () => {
     }
   });
 
-  it('routes complex prompts to sonnet', () => {
+  it('routes complex prompts over 300 chars to sonnet', () => {
+    // Prompt intentionally >300 chars with no tool keywords to verify length cutoff
     const result = classifyQuery(
-      'Analyze my spending this month and create a summary report with charts',
+      'Analyze my spending this month and create a summary report with charts. Include breakdowns by category, trends over time, and comparisons to previous months. Also highlight any anomalies or unusual spending patterns you detect. Be thorough and very detailed in your analysis, covering all aspects of my finances.',
       false, true,
     );
     expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('default-sonnet');
+  });
+
+  it('routes short Q&A without tool keywords to haiku', () => {
+    const result = classifyQuery('what is the capital of France?', false, true);
+    expect(result.model).toContain('haiku');
+    expect(result.reason).toBe('short-no-tools');
+  });
+
+  it('routes short prompt with tool keywords to sonnet', () => {
+    const result = classifyQuery('schedule a meeting for tomorrow at 3pm', false, true);
+    expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('default-sonnet');
+  });
+
+  it('routes long Q&A to sonnet regardless', () => {
+    const longPrompt = 'I need you to analyze this situation and provide recommendations. '.repeat(6);
+    const result = classifyQuery(longPrompt, false, true);
+    expect(result.model).toContain('sonnet');
   });
 
   it('scheduled task overrides all other checks', () => {

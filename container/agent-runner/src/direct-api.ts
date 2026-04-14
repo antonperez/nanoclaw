@@ -424,6 +424,8 @@ export async function directQuery(
     cache_read_input_tokens: 0,
     cache_creation_input_tokens: 0,
   };
+  // Running cost sum — tracks mixed-model turns accurately
+  let totalCostUsd = 0;
 
   // Token-budget session truncation: estimate message tokens and trim from
   // the front when total history exceeds the budget. More accurate than a
@@ -441,9 +443,14 @@ export async function directQuery(
     if (compression.compressionUsage) {
       totalUsage.input_tokens += compression.compressionUsage.input_tokens;
       totalUsage.output_tokens += compression.compressionUsage.output_tokens;
-      log(
-        `Compression cost: ${compression.compressionUsage.input_tokens} in + ${compression.compressionUsage.output_tokens} out (Haiku)`,
-      );
+      const compressionCost = calcCost({
+        input_tokens: compression.compressionUsage.input_tokens,
+        output_tokens: compression.compressionUsage.output_tokens,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      }, 'claude-haiku-4-5-20251001');
+      totalCostUsd += compressionCost;
+      log(`Compression cost: $${compressionCost.toFixed(4)} (Haiku)`);
     }
   }
 
@@ -458,14 +465,27 @@ export async function directQuery(
 
   let turns = 0;
   let finalText: string | null = null;
+  let lastStopReason: string | null = null;
 
   try {
     while (turns < options.maxTurns) {
       turns++;
+
+      // Step down to Haiku for intermediate tool-routing turns.
+      // Turn 1 uses the routed model for initial reasoning/planning.
+      // Subsequent turns after a tool_use stop are mechanical — Haiku handles them fine.
+      // Stay on the original model if it's already Haiku or cheaper.
+      const turnModel: string = (turns > 1 && lastStopReason === 'tool_use' && options.model.includes('sonnet'))
+        ? 'claude-haiku-4-5-20251001'
+        : options.model;
+      if (turnModel !== options.model) {
+        log(`Step-down: using Haiku for tool turn ${turns}`);
+      }
+
       log(`Turn ${turns}/${options.maxTurns}`);
 
       const response = await client.messages.create({
-        model: options.model,
+        model: turnModel,
         max_tokens: options.maxResponseTokens ?? 4096,
         system: [
           {
@@ -491,14 +511,24 @@ export async function directQuery(
       totalUsage.cache_creation_input_tokens +=
         (u as unknown as Record<string, number>).cache_creation_input_tokens ?? 0;
 
+      lastStopReason = response.stop_reason;
+
+      // Accumulate per-turn cost using the actual model used for this turn
+      const turnCost = calcCost({
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        cache_read_input_tokens: (u as unknown as Record<string, number>).cache_read_input_tokens ?? 0,
+        cache_creation_input_tokens: (u as unknown as Record<string, number>).cache_creation_input_tokens ?? 0,
+      }, turnModel);
+      totalCostUsd += turnCost;
+
       log(
         `API response: stop=${response.stop_reason} blocks=${response.content.length} input=${u.input_tokens} output=${u.output_tokens}`,
       );
 
       // Check budget
-      const costSoFar = calcCost(totalUsage, options.model);
-      if (costSoFar > options.maxBudgetUsd) {
-        log(`Budget exceeded: $${costSoFar.toFixed(4)} > $${options.maxBudgetUsd}`);
+      if (totalCostUsd > options.maxBudgetUsd) {
+        log(`Budget exceeded: $${totalCostUsd.toFixed(4)} > $${options.maxBudgetUsd}`);
         break;
       }
 
@@ -570,7 +600,7 @@ export async function directQuery(
   return {
     text: finalText,
     usage: totalUsage,
-    costUsd: calcCost(totalUsage, options.model),
+    costUsd: totalCostUsd,
     turns,
   };
 }
