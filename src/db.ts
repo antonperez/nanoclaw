@@ -84,7 +84,8 @@ function createSchema(database: Database.Database): void {
     );
   `);
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
+  // context_mode column exists for schema compat but is always 'isolated'.
+  // 'group' is no longer a valid value — tasks never resume the group session.
   try {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
@@ -92,6 +93,32 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Sessions are tagged by source so interactive and task sessions cannot
+  // cross-contaminate. Only 'interactive' sessions are resumed by the chat loop.
+  try {
+    database.exec(
+      `ALTER TABLE sessions ADD COLUMN source TEXT NOT NULL DEFAULT 'interactive'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Track when a session was created so the host can rotate stale sessions.
+  try {
+    database.exec(
+      `ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '${new Date().toISOString()}'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Migrate any old tasks that still have context_mode='group' to 'isolated'.
+  // Group mode caused tasks to resume the interactive session, compounding tokens
+  // on every tool-call turn. All tasks are now always isolated.
+  database.exec(
+    `UPDATE scheduled_tasks SET context_mode = 'isolated' WHERE context_mode = 'group'`,
+  );
 
   // Add script column if it doesn't exist (migration for existing DBs)
   try {
@@ -420,7 +447,7 @@ export function createTask(
     task.script || null,
     task.schedule_type,
     task.schedule_value,
-    task.context_mode || 'isolated',
+    'isolated', // always isolated — tasks must not resume the group session
     task.next_run,
     task.status,
     task.created_at,
@@ -564,20 +591,71 @@ export function setRouterState(key: string, value: string): void {
 
 // --- Session accessors ---
 
+// Session .jsonl files live at:
+// {DATA_DIR}/sessions/{groupFolder}/.claude/projects/-workspace-group/{sessionId}.jsonl
+function sessionJsonlPath(groupFolder: string, sessionId: string): string {
+  return path.join(
+    DATA_DIR,
+    'sessions',
+    groupFolder,
+    '.claude',
+    'projects',
+    '-workspace-group',
+    `${sessionId}.jsonl`,
+  );
+}
+
+function archiveSessionFile(groupFolder: string, sessionId: string): void {
+  const src = sessionJsonlPath(groupFolder, sessionId);
+  if (!fs.existsSync(src)) return;
+  const archiveDir = path.join(DATA_DIR, 'sessions', groupFolder, 'archived');
+  fs.mkdirSync(archiveDir, { recursive: true });
+  const dest = path.join(archiveDir, `${Date.now()}-${sessionId}.jsonl`);
+  try {
+    fs.renameSync(src, dest);
+    logger.debug({ src, dest }, 'Session .jsonl archived');
+  } catch (err) {
+    logger.warn({ err, src }, 'Could not archive session .jsonl');
+  }
+}
+
+// Only 'interactive' sessions are eligible for resumption by the chat loop.
+// Task sessions are always isolated and never persisted here.
 export function getSession(groupFolder: string): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
+    .prepare(
+      "SELECT session_id FROM sessions WHERE group_folder = ? AND source = 'interactive'",
+    )
     .get(groupFolder) as { session_id: string } | undefined;
   return row?.session_id;
 }
 
-export function setSession(groupFolder: string, sessionId: string): void {
+export function getSessionCreatedAt(groupFolder: string): string | undefined {
+  const row = db
+    .prepare(
+      "SELECT created_at FROM sessions WHERE group_folder = ? AND source = 'interactive'",
+    )
+    .get(groupFolder) as { created_at: string } | undefined;
+  return row?.created_at;
+}
+
+export function setSession(
+  groupFolder: string,
+  sessionId: string,
+  source: 'interactive' = 'interactive',
+): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
-  ).run(groupFolder, sessionId);
+    'INSERT OR REPLACE INTO sessions (group_folder, session_id, source, created_at) VALUES (?, ?, ?, ?)',
+  ).run(groupFolder, sessionId, source, new Date().toISOString());
 }
 
 export function deleteSession(groupFolder: string): void {
+  const row = db
+    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
+    .get(groupFolder) as { session_id: string } | undefined;
+  if (row?.session_id) {
+    archiveSessionFile(groupFolder, row.session_id);
+  }
   db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
 }
 
@@ -602,7 +680,9 @@ export function getRecentMessages(
 
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
+    .prepare(
+      "SELECT group_folder, session_id FROM sessions WHERE source = 'interactive'",
+    )
     .all() as Array<{ group_folder: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {

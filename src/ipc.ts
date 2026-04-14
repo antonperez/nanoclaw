@@ -312,7 +312,7 @@ export async function processTaskIpc(
     prompt?: string;
     schedule_type?: string;
     schedule_value?: string;
-    context_mode?: string;
+
     script?: string;
     groupFolder?: string;
     chatJid?: string;
@@ -403,10 +403,6 @@ export async function processTaskIpc(
         const taskId =
           data.taskId ||
           `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const contextMode =
-          data.context_mode === 'group' || data.context_mode === 'isolated'
-            ? data.context_mode
-            : 'isolated';
         createTask({
           id: taskId,
           group_folder: targetFolder,
@@ -415,13 +411,13 @@ export async function processTaskIpc(
           script: data.script || null,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
-          context_mode: contextMode,
+          context_mode: 'isolated',
           next_run: nextRun,
           status: 'active',
           created_at: new Date().toISOString(),
         });
         logger.info(
-          { taskId, sourceGroup, targetFolder, contextMode },
+          { taskId, sourceGroup, targetFolder },
           'Task created via IPC',
         );
         deps.onTasksChanged();

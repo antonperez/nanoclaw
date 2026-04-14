@@ -115,12 +115,6 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       .describe(
         'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)',
       ),
-    context_mode: z
-      .enum(['group', 'isolated'])
-      .default('group')
-      .describe(
-        'group=runs with chat history and memory, isolated=fresh session (include context in prompt)',
-      ),
     target_group_jid: z
       .string()
       .optional()
@@ -205,7 +199,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       script: args.script || undefined,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
-      context_mode: args.context_mode || 'group',
+      context_mode: 'isolated',
       targetJid,
       createdBy: groupFolder,
       timestamp: new Date().toISOString(),
@@ -260,13 +254,12 @@ server.tool(
         .map(
           (t: {
             id: string;
-            prompt: string;
             schedule_type: string;
             schedule_value: string;
             status: string;
             next_run: string;
           }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+            `- [${t.id}] ${t.schedule_type}: ${t.schedule_value} — ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
 
@@ -636,6 +629,133 @@ Redirects are followed automatically.`,
       return { content: [{ type: 'text' as const, text: `HTTP ${status}\n\n${text}` }] };
     } catch (err) {
       return { content: [{ type: 'text' as const, text: `CardDAV error: ${err}` }], isError: true };
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// web_fetch — truncated web fetcher replacing the built-in WebFetch tool.
+// Max ~500 tokens (~2000 chars) per source. News gets headline+sentence only;
+// weather gets structured data only; general pages get the first 2000 chars.
+// ---------------------------------------------------------------------------
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractWeatherJson(json: unknown): string {
+  if (typeof json !== 'object' || json === null) return JSON.stringify(json).slice(0, 500);
+  const j = json as Record<string, unknown>;
+  // OpenWeatherMap structure
+  if (j.main || j.weather) {
+    const m = (j.main || {}) as Record<string, unknown>;
+    const w = Array.isArray(j.weather) ? (j.weather[0] as Record<string, unknown>) : {};
+    const wind = (j.wind || {}) as Record<string, unknown>;
+    return JSON.stringify({
+      temp_c: m.temp != null ? +(Number(m.temp) - 273.15).toFixed(1) : undefined,
+      feels_like_c: m.feels_like != null ? +(Number(m.feels_like) - 273.15).toFixed(1) : undefined,
+      humidity_pct: m.humidity,
+      description: w.description,
+      wind_kph: wind.speed != null ? +(Number(wind.speed) * 3.6).toFixed(1) : undefined,
+    });
+  }
+  // wttr.in or generic structure — just truncate
+  return JSON.stringify(json).slice(0, 800);
+}
+
+function extractNewsHtml(html: string): string {
+  // Try to pull <h1> + first <p>
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  const headline = h1 ? stripHtml(h1[1]).trim() : '';
+  const para = html.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+  const firstPara = para ? stripHtml(para[1]).trim() : '';
+  const firstSentence = firstPara.split(/(?<=[.!?])\s/)[0] ?? firstPara;
+  if (headline) return `${headline}\n${firstSentence}`.slice(0, 500);
+  return stripHtml(html).slice(0, 500);
+}
+
+server.tool(
+  'web_fetch',
+  'Fetch content from a URL. Returns truncated text — max ~500 tokens. Replaces the built-in WebFetch with token-efficient extraction: news returns headline + first sentence, weather returns structured data only, other pages return first 2000 characters.',
+  {
+    url: z.string().describe('The URL to fetch'),
+  },
+  async (args) => {
+    const MAX_CHARS = 2000;
+    try {
+      const response = await fetch(args.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
+          Accept: 'text/html,application/json,*/*',
+        },
+        signal: AbortSignal.timeout(12000),
+      });
+
+      const contentType = response.headers.get('content-type') ?? '';
+      const urlLower = args.url.toLowerCase();
+      const isWeather =
+        urlLower.includes('weather') ||
+        urlLower.includes('forecast') ||
+        urlLower.includes('openweather') ||
+        urlLower.includes('wttr.in') ||
+        urlLower.includes('meteo');
+      const isNews =
+        urlLower.includes('/news/') ||
+        urlLower.includes('/article') ||
+        urlLower.includes('bbc.') ||
+        urlLower.includes('reuters.') ||
+        urlLower.includes('cnn.') ||
+        urlLower.includes('rappler.') ||
+        urlLower.includes('inquirer.') ||
+        urlLower.includes('abs-cbn.');
+
+      let result: string;
+
+      if (contentType.includes('application/json')) {
+        const json = await response.json();
+        result = isWeather ? extractWeatherJson(json) : JSON.stringify(json).slice(0, MAX_CHARS);
+      } else {
+        const html = await response.text();
+        if (isNews) {
+          result = extractNewsHtml(html);
+        } else if (isWeather) {
+          result = stripHtml(html).slice(0, 600);
+        } else {
+          result = stripHtml(html).slice(0, MAX_CHARS);
+        }
+      }
+
+      const byteLen = Buffer.byteLength(result, 'utf8');
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `[web_fetch: ${args.url} — ${byteLen} bytes returned]\n\n${result}`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `web_fetch error for ${args.url}: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
     }
   },
 );

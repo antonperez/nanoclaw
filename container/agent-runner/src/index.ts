@@ -128,32 +128,34 @@ function log(message: string): void {
 }
 
 const TOKEN_LOG_PATH = '/workspace/group/notes/token-log.csv';
-const INPUT_COST_PER_M = 3.0;
-const OUTPUT_COST_PER_M = 15.0;
 
 function logTokenUsage(
   sessionId: string,
   inputTokens: number,
   outputTokens: number,
+  cacheReadTokens: number,
+  cacheCreationTokens: number,
+  costUsd: number,
 ): void {
   try {
     const timestamp = new Date().toISOString();
-    const totalTokens = inputTokens + outputTokens;
-    const costUsd =
-      (inputTokens * INPUT_COST_PER_M + outputTokens * OUTPUT_COST_PER_M) /
-      1_000_000;
+    const totalInputTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
+    const totalTokens = totalInputTokens + outputTokens;
 
     const needsHeader = !fs.existsSync(TOKEN_LOG_PATH);
     if (needsHeader) {
       fs.mkdirSync(path.dirname(TOKEN_LOG_PATH), { recursive: true });
       fs.writeFileSync(
         TOKEN_LOG_PATH,
-        'timestamp,session_id,input_tokens,output_tokens,total_tokens,cost_usd\n',
+        'timestamp,session_id,input_tokens,cache_read_tokens,cache_creation_tokens,output_tokens,total_tokens,cost_usd\n',
       );
     }
 
-    const line = `${timestamp},${sessionId},${inputTokens},${outputTokens},${totalTokens},${costUsd.toFixed(6)}\n`;
+    const line = `${timestamp},${sessionId},${inputTokens},${cacheReadTokens},${cacheCreationTokens},${outputTokens},${totalTokens},${costUsd.toFixed(6)}\n`;
     fs.appendFileSync(TOKEN_LOG_PATH, line);
+    log(
+      `Token usage: input=${inputTokens} cache_read=${cacheReadTokens} cache_creation=${cacheCreationTokens} output=${outputTokens} total=${totalTokens} cost=$${costUsd.toFixed(4)}`,
+    );
   } catch (err) {
     log(`Token log write failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -444,69 +446,72 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+  // Build a lean system prompt. The `claude_code` preset is ~8K tokens of coding
+  // instructions (git, PRs, code review) that a chat assistant doesn't need.
+  // A custom string prompt saves ~7.5K tokens per API call.
+  const groupClaudeMdPath = '/workspace/group/CLAUDE.md';
+  let groupClaudeMd = '';
+  if (fs.existsSync(groupClaudeMdPath)) {
+    groupClaudeMd = fs.readFileSync(groupClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
-  const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) {
-        extraDirs.push(fullPath);
-      }
-    }
+  const systemPrompt = [
+    `You are ${containerInput.assistantName || 'Andy'}, a personal AI assistant running inside NanoClaw.`,
+    'You have tools to search the web, read/write files in the workspace, run shell commands, and interact with NanoClaw (send messages, schedule tasks, manage contacts, fetch web pages).',
+    'Use Telegram-compatible formatting: *bold*, _italic_, `code`, ```code blocks```. No Markdown headers (##) or link syntax.',
+    'Be direct, concise, and proactive. Follow all rules in CLAUDE.md.',
+    'Answer from memory when possible. Only call tools when real-time data, file I/O, or web lookup is required. Each tool call costs a full API round-trip.',
+    groupClaudeMd ? `\n---\n\n${groupClaudeMd}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  log(`System prompt: ${systemPrompt.length} chars (~${Math.round(systemPrompt.length / 4)} tokens)`);
+
+  // Strip auto-loaded skills — the CLI discovers .claude/skills/ and injects every
+  // SKILL.md into the system prompt (~4.5K tokens). MCP tools cover all functionality.
+  const skillsDir = '/home/node/.claude/skills';
+  if (fs.existsSync(skillsDir)) {
+    fs.rmSync(skillsDir, { recursive: true, force: true });
+    log('Stripped .claude/skills/ to save ~4.5K tokens');
   }
 
-  if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
-  }
+  // Neuter settings.json — agent teams and auto-memory add overhead.
+  const settingsPath = '/home/node/.claude/settings.json';
+  fs.writeFileSync(settingsPath, JSON.stringify({ env: {} }));
+  log('Reset .claude/settings.json (disabled agent teams + auto-memory)');
+
+  // Minimal tool set — 5 SDK tools instead of 12. Saves ~2K tokens in schemas.
+  // Removed: Edit (use Write), Glob/Grep (use Bash find/grep), Task, SendMessage,
+  // ToolSearch, Skill — all unused or rarely used by the chat assistant.
+  const allowedTools = [
+    'Bash',
+    'Read',
+    'Write',
+    'WebSearch',
+    'mcp__nanoclaw__*',
+  ];
+  log(`[tools] ${allowedTools.length} tool entries: ${allowedTools.join(', ')}`);
 
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read',
-        'Write',
-        'Edit',
-        'Glob',
-        'Grep',
-        'WebSearch',
-        'WebFetch',
-        'Task',
-        'TaskOutput',
-        'TaskStop',
-        'TeamCreate',
-        'TeamDelete',
-        'SendMessage',
-        'TodoWrite',
-        'ToolSearch',
-        'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-      ],
+      systemPrompt,
+      allowedTools,
+      // Limit agentic turns to prevent runaway tool-call loops.
+      // Interactive: 15 turns is generous for search + follow-up.
+      // Scheduled tasks: 8 turns keeps cost predictable.
+      maxTurns: containerInput.isScheduledTask ? 8 : 15,
+      // Hard budget cap per query — safety net against context explosion.
+      maxBudgetUsd: containerInput.isScheduledTask ? 0.10 : 0.25,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
+      // No settingSources — CLAUDE.md is already inlined in systemPrompt.
+      // 'project' would auto-load it again, doubling the tokens.
       mcpServers: {
         nanoclaw: {
           command: 'node',
@@ -562,12 +567,23 @@ async function runQuery(
       log(
         `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
       );
-      const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
-      if (usage) {
+      const resultMsg = message as {
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+          cache_creation_input_tokens?: number;
+        };
+        total_cost_usd?: number;
+      };
+      if (resultMsg.usage) {
         logTokenUsage(
           newSessionId ?? 'unknown',
-          usage.input_tokens ?? 0,
-          usage.output_tokens ?? 0,
+          resultMsg.usage.input_tokens ?? 0,
+          resultMsg.usage.output_tokens ?? 0,
+          resultMsg.usage.cache_read_input_tokens ?? 0,
+          resultMsg.usage.cache_creation_input_tokens ?? 0,
+          resultMsg.total_cost_usd ?? 0,
         );
       }
       writeOutput({
@@ -666,7 +682,9 @@ async function main(): Promise<void> {
   // No real secrets exist in the container environment.
   const sdkEnv: Record<string, string | undefined> = {
     ...process.env,
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
+    // Auto-compact at 80K tokens instead of the default 200K.
+    // Keeps resumed sessions lean — each turn resends the full context.
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '80000',
   };
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

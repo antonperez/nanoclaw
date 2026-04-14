@@ -31,6 +31,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -263,26 +264,24 @@ async function buildContainerArgs(
   // Default to Sonnet — subagents/tools can still escalate to Opus when needed
   args.push('-e', 'CLAUDE_MODEL=sonnet');
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
   // iCloud DAV base URL — agents use this to make CalDAV/CardDAV requests via the proxy
   args.push(
     '-e',
     `NANOCLAW_DAV_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__dav`,
   );
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
+  // Auth: pass the real API key directly so containers hit api.anthropic.com.
+  // The credential proxy is still used for DAV (iCloud) requests only.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
+    args.push('-e', `ANTHROPIC_API_KEY=${secrets.ANTHROPIC_API_KEY}`);
   } else {
+    // Legacy OAuth fallback — route through proxy
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
@@ -728,8 +727,6 @@ export function writeTasksSnapshot(
   tasks: Array<{
     id: string;
     groupFolder: string;
-    prompt: string;
-    script?: string | null;
     schedule_type: string;
     schedule_value: string;
     status: string;
