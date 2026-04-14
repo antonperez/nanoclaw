@@ -18,6 +18,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { directQuery } from './direct-api.js';
+import { runDailyBrief } from './daily-brief.js';
 
 interface ContainerInput {
   prompt: string;
@@ -177,6 +178,36 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Classify a query to select the cheapest adequate model.
+ * Returns Haiku for scheduled tasks, short single-turn lookups, and simple patterns.
+ * Falls back to Sonnet for everything else.
+ */
+function classifyQuery(
+  prompt: string,
+  isScheduledTask: boolean,
+  hasSession: boolean,
+): { model: string; reason: string } {
+  // Scheduled tasks always use Haiku (daily briefs, reminders, etc.)
+  if (isScheduledTask) {
+    return { model: 'claude-haiku-4-5-20251001', reason: 'scheduled-task' };
+  }
+
+  // Short prompts with no session history → Haiku for single-turn lookups
+  if (!hasSession && prompt.length < 200) {
+    return { model: 'claude-haiku-4-5-20251001', reason: 'short-no-history' };
+  }
+
+  // Simple patterns that don't need Sonnet's reasoning
+  const simplePatterns = /^(hi|hello|hey|good morning|good evening|what time|what day|what date|thank|thanks|ok|okay|gm|gn)\b/i;
+  if (simplePatterns.test(prompt.trim())) {
+    return { model: 'claude-haiku-4-5-20251001', reason: 'simple-pattern' };
+  }
+
+  // Default to Sonnet
+  return { model: 'claude-sonnet-4-20250514', reason: 'default-sonnet' };
+}
+
+/**
  * Build the system prompt from template + group CLAUDE.md.
  */
 function buildSystemPrompt(assistantName?: string): string {
@@ -220,14 +251,46 @@ async function runQuery(
   const sessionPath = path.join(sessionDir, `${sid}.jsonl`);
   fs.mkdirSync(sessionDir, { recursive: true });
 
-  // Resolve short model names to full API IDs (SDK did this automatically)
+  // Smart model routing — classify query to pick cheapest adequate model
+  const hasSession = !!sessionId;
+  const routing = classifyQuery(prompt, containerInput.isScheduledTask ?? false, hasSession);
+
+  // Allow CLAUDE_MODEL env to override routing (e.g. force opus for testing)
+  const envModel = process.env.CLAUDE_MODEL;
   const MODEL_ALIASES: Record<string, string> = {
     sonnet: 'claude-sonnet-4-20250514',
     opus: 'claude-opus-4-20250514',
     haiku: 'claude-haiku-4-5-20251001',
   };
-  const rawModel = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
-  const model = MODEL_ALIASES[rawModel] || rawModel;
+  const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
+  log(`Model routing: ${model} (reason: ${envModel ? 'env-override' : routing.reason})`);
+
+  // Detect daily brief and use parallel pipeline instead of single query
+  const isDailyBrief = (containerInput.isScheduledTask ?? false) &&
+    /daily\s*brief|morning\s*brief|daily\s*digest/i.test(prompt);
+
+  if (isDailyBrief) {
+    log('Detected daily brief — using parallel section pipeline');
+    const briefResult = await runDailyBrief(log);
+
+    logTokenUsage(
+      sid,
+      briefResult.totalInputTokens,
+      briefResult.totalOutputTokens,
+      0,
+      0,
+      briefResult.costUsd,
+    );
+
+    writeOutput({
+      status: 'success',
+      result: briefResult.text,
+      newSessionId: sid,
+    });
+
+    log(`Daily brief done. Tokens: ${briefResult.totalInputTokens + briefResult.totalOutputTokens}`);
+    return { newSessionId: sid, closedDuringQuery: false };
+  }
 
   const result = await directQuery({
     prompt,
