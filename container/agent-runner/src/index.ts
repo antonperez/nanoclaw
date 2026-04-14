@@ -220,7 +220,14 @@ async function runQuery(
   const sessionPath = path.join(sessionDir, `${sid}.jsonl`);
   fs.mkdirSync(sessionDir, { recursive: true });
 
-  const model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
+  // Resolve short model names to full API IDs (SDK did this automatically)
+  const MODEL_ALIASES: Record<string, string> = {
+    sonnet: 'claude-sonnet-4-20250514',
+    opus: 'claude-opus-4-20250514',
+    haiku: 'claude-haiku-4-5-20251001',
+  };
+  const rawModel = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
+  const model = MODEL_ALIASES[rawModel] || rawModel;
 
   const result = await directQuery({
     prompt,

@@ -244,9 +244,16 @@ export function loadSession(sessionPath: string): Message[] {
   if (!fs.existsSync(sessionPath)) return [];
   try {
     const lines = fs.readFileSync(sessionPath, 'utf-8').trim().split('\n');
-    return lines
+    const messages = lines
       .filter((l) => l.trim())
-      .map((l) => JSON.parse(l) as Message);
+      .map((l) => {
+        try { return JSON.parse(l); } catch { return null; }
+      })
+      .filter((m): m is Message =>
+        m !== null && typeof m === 'object' && 'role' in m &&
+        (m.role === 'user' || m.role === 'assistant'),
+      );
+    return messages;
   } catch {
     return [];
   }
