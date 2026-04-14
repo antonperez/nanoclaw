@@ -52,20 +52,41 @@ type ToolUseBlock = Anthropic.ToolUseBlock;
 
 // --- Cost calculation ---
 
-// Sonnet 4 pricing (per million tokens)
-const COST_PER_M = {
+// Per-model pricing (per million tokens)
+const SONNET_PRICING = {
   input: 3.0,
   output: 15.0,
   cache_read: 0.3,
   cache_creation: 3.75,
 };
 
-export function calcCost(usage: DirectQueryResult['usage']): number {
+const OPUS_PRICING = {
+  input: 15.0,
+  output: 75.0,
+  cache_read: 1.5,
+  cache_creation: 18.75,
+};
+
+const HAIKU_PRICING = {
+  input: 0.8,
+  output: 4.0,
+  cache_read: 0.08,
+  cache_creation: 1.0,
+};
+
+function getPricing(model: string) {
+  if (model.includes('opus')) return OPUS_PRICING;
+  if (model.includes('haiku')) return HAIKU_PRICING;
+  return SONNET_PRICING; // default
+}
+
+export function calcCost(usage: DirectQueryResult['usage'], model?: string): number {
+  const p = model ? getPricing(model) : SONNET_PRICING;
   return (
-    (usage.input_tokens * COST_PER_M.input +
-      usage.output_tokens * COST_PER_M.output +
-      usage.cache_read_input_tokens * COST_PER_M.cache_read +
-      usage.cache_creation_input_tokens * COST_PER_M.cache_creation) /
+    (usage.input_tokens * p.input +
+      usage.output_tokens * p.output +
+      usage.cache_read_input_tokens * p.cache_read +
+      usage.cache_creation_input_tokens * p.cache_creation) /
     1_000_000
   );
 }
@@ -95,6 +116,9 @@ function execBash(command: string): Promise<string> {
 function readFile(filePath: string, offset?: number, limit?: number): string {
   try {
     const resolved = path.resolve('/workspace/group', filePath);
+    if (!resolved.startsWith('/workspace/')) {
+      return 'Error: path must be within /workspace/';
+    }
     const content = fs.readFileSync(resolved, 'utf-8');
     const lines = content.split('\n');
     const start = offset ?? 0;
@@ -111,6 +135,9 @@ function readFile(filePath: string, offset?: number, limit?: number): string {
 function writeFile(filePath: string, content: string): string {
   try {
     const resolved = path.resolve('/workspace/group', filePath);
+    if (!resolved.startsWith('/workspace/')) {
+      return 'Error: path must be within /workspace/';
+    }
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content);
     return `Written ${content.length} bytes to ${filePath}`;
@@ -294,6 +321,15 @@ export async function directQuery(
     content: options.prompt,
   });
 
+  // Cap session history to prevent unbounded context growth.
+  // Keep most recent messages; the system prompt provides continuity.
+  const MAX_SESSION_MESSAGES = 40;
+  if (messages.length > MAX_SESSION_MESSAGES) {
+    const trimmed = messages.length - MAX_SESSION_MESSAGES;
+    messages.splice(0, trimmed);
+    log(`Trimmed ${trimmed} old messages from session (kept last ${MAX_SESSION_MESSAGES})`);
+  }
+
   // Accumulate usage across turns
   const totalUsage: DirectQueryResult['usage'] = {
     input_tokens: 0,
@@ -342,7 +378,7 @@ export async function directQuery(
       );
 
       // Check budget
-      const costSoFar = calcCost(totalUsage);
+      const costSoFar = calcCost(totalUsage, options.model);
       if (costSoFar > options.maxBudgetUsd) {
         log(`Budget exceeded: $${costSoFar.toFixed(4)} > $${options.maxBudgetUsd}`);
         break;
@@ -416,7 +452,7 @@ export async function directQuery(
   return {
     text: finalText,
     usage: totalUsage,
-    costUsd: calcCost(totalUsage),
+    costUsd: calcCost(totalUsage, options.model),
     turns,
   };
 }
