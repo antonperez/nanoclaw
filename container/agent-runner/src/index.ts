@@ -10,19 +10,14 @@
  *
  * Stdout protocol:
  *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
- *   Multiple results may be emitted (one per agent teams result).
  *   Final marker after loop ends signals completion.
  */
 
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
-import {
-  query,
-  HookCallback,
-  PreCompactHookInput,
-} from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { directQuery } from './direct-api.js';
 
 interface ContainerInput {
   prompt: string;
@@ -42,65 +37,9 @@ interface ContainerOutput {
   error?: string;
 }
 
-interface SessionEntry {
-  sessionId: string;
-  fullPath: string;
-  summary: string;
-  firstPrompt: string;
-}
-
-interface SessionsIndex {
-  entries: SessionEntry[];
-}
-
-interface SDKUserMessage {
-  type: 'user';
-  message: { role: 'user'; content: string };
-  parent_tool_use_id: null;
-  session_id: string;
-}
-
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-
-/**
- * Push-based async iterable for streaming user messages to the SDK.
- * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
- */
-class MessageStream {
-  private queue: SDKUserMessage[] = [];
-  private waiting: (() => void) | null = null;
-  private done = false;
-
-  push(text: string): void {
-    this.queue.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-      session_id: '',
-    });
-    this.waiting?.();
-  }
-
-  end(): void {
-    this.done = true;
-    this.waiting?.();
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (true) {
-      while (this.queue.length > 0) {
-        yield this.queue.shift()!;
-      }
-      if (this.done) return;
-      await new Promise<void>((r) => {
-        this.waiting = r;
-      });
-      this.waiting = null;
-    }
-  }
-}
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -159,168 +98,6 @@ function logTokenUsage(
   } catch (err) {
     log(`Token log write failed: ${err instanceof Error ? err.message : String(err)}`);
   }
-}
-
-function getSessionSummary(
-  sessionId: string,
-  transcriptPath: string,
-): string | null {
-  const projectDir = path.dirname(transcriptPath);
-  const indexPath = path.join(projectDir, 'sessions-index.json');
-
-  if (!fs.existsSync(indexPath)) {
-    log(`Sessions index not found at ${indexPath}`);
-    return null;
-  }
-
-  try {
-    const index: SessionsIndex = JSON.parse(
-      fs.readFileSync(indexPath, 'utf-8'),
-    );
-    const entry = index.entries.find((e) => e.sessionId === sessionId);
-    if (entry?.summary) {
-      return entry.summary;
-    }
-  } catch (err) {
-    log(
-      `Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  return null;
-}
-
-/**
- * Archive the full transcript to conversations/ before compaction.
- */
-function createPreCompactHook(assistantName?: string): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preCompact = input as PreCompactHookInput;
-    const transcriptPath = preCompact.transcript_path;
-    const sessionId = preCompact.session_id;
-
-    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      log('No transcript found for archiving');
-      return {};
-    }
-
-    try {
-      const content = fs.readFileSync(transcriptPath, 'utf-8');
-      const messages = parseTranscript(content);
-
-      if (messages.length === 0) {
-        log('No messages to archive');
-        return {};
-      }
-
-      const summary = getSessionSummary(sessionId, transcriptPath);
-      const name = summary ? sanitizeFilename(summary) : generateFallbackName();
-
-      const conversationsDir = '/workspace/group/conversations';
-      fs.mkdirSync(conversationsDir, { recursive: true });
-
-      const date = new Date().toISOString().split('T')[0];
-      const filename = `${date}-${name}.md`;
-      const filePath = path.join(conversationsDir, filename);
-
-      const markdown = formatTranscriptMarkdown(
-        messages,
-        summary,
-        assistantName,
-      );
-      fs.writeFileSync(filePath, markdown);
-
-      log(`Archived conversation to ${filePath}`);
-    } catch (err) {
-      log(
-        `Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    return {};
-  };
-}
-
-function sanitizeFilename(summary: string): string {
-  return summary
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
-}
-
-function generateFallbackName(): string {
-  const time = new Date();
-  return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
-}
-
-interface ParsedMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-function parseTranscript(content: string): ParsedMessage[] {
-  const messages: ParsedMessage[] = [];
-
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      if (entry.type === 'user' && entry.message?.content) {
-        const text =
-          typeof entry.message.content === 'string'
-            ? entry.message.content
-            : entry.message.content
-                .map((c: { text?: string }) => c.text || '')
-                .join('');
-        if (text) messages.push({ role: 'user', content: text });
-      } else if (entry.type === 'assistant' && entry.message?.content) {
-        const textParts = entry.message.content
-          .filter((c: { type: string }) => c.type === 'text')
-          .map((c: { text: string }) => c.text);
-        const text = textParts.join('');
-        if (text) messages.push({ role: 'assistant', content: text });
-      }
-    } catch {}
-  }
-
-  return messages;
-}
-
-function formatTranscriptMarkdown(
-  messages: ParsedMessage[],
-  title?: string | null,
-  assistantName?: string,
-): string {
-  const now = new Date();
-  const formatDateTime = (d: Date) =>
-    d.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-
-  const lines: string[] = [];
-  lines.push(`# ${title || 'Conversation'}`);
-  lines.push('');
-  lines.push(`Archived: ${formatDateTime(now)}`);
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-
-  for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : assistantName || 'Assistant';
-    const content =
-      msg.content.length > 2000
-        ? msg.content.slice(0, 2000) + '...'
-        : msg.content;
-    lines.push(`**${sender}**: ${content}`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
 }
 
 /**
@@ -400,205 +177,97 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
- * Run a single query and stream results via writeOutput.
- * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
- * allowing agent teams subagents to run to completion.
- * Also pipes IPC messages into the stream during the query.
+ * Build the system prompt from template + group CLAUDE.md.
  */
-async function runQuery(
-  prompt: string,
-  sessionId: string | undefined,
-  mcpServerPath: string,
-  containerInput: ContainerInput,
-  sdkEnv: Record<string, string | undefined>,
-  resumeAt?: string,
-): Promise<{
-  newSessionId?: string;
-  lastAssistantUuid?: string;
-  closedDuringQuery: boolean;
-}> {
-  const stream = new MessageStream();
-  stream.push(prompt);
-
-  // Poll IPC for follow-up messages and _close sentinel during the query
-  let ipcPolling = true;
-  let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
-      closedDuringQuery = true;
-      stream.end();
-      ipcPolling = false;
-      return;
-    }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
-    }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-  };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
-
-  let newSessionId: string | undefined;
-  let lastAssistantUuid: string | undefined;
-  let messageCount = 0;
-  let resultCount = 0;
-
-  // Build a lean system prompt. The `claude_code` preset is ~8K tokens of coding
-  // instructions (git, PRs, code review) that a chat assistant doesn't need.
-  // A custom string prompt saves ~7.5K tokens per API call.
+function buildSystemPrompt(assistantName?: string): string {
   const groupClaudeMdPath = '/workspace/group/CLAUDE.md';
   let groupClaudeMd = '';
   if (fs.existsSync(groupClaudeMdPath)) {
     groupClaudeMd = fs.readFileSync(groupClaudeMdPath, 'utf-8');
   }
 
-  const systemPrompt = [
-    `You are ${containerInput.assistantName || 'Andy'}, a personal AI assistant running inside NanoClaw.`,
+  return [
+    `You are ${assistantName || 'Andy'}, a personal AI assistant running inside NanoClaw.`,
     'You have tools to search the web, read/write files in the workspace, run shell commands, and interact with NanoClaw (send messages, schedule tasks, manage contacts, fetch web pages).',
     'Use Telegram-compatible formatting: *bold*, _italic_, `code`, ```code blocks```. No Markdown headers (##) or link syntax.',
-    'Be direct, concise, and proactive. Follow all rules in CLAUDE.md.',
+    'Be direct, concise, and proactive. Follow all rules in the instructions below.',
     'Answer from memory when possible. Only call tools when real-time data, file I/O, or web lookup is required. Each tool call costs a full API round-trip.',
     groupClaudeMd ? `\n---\n\n${groupClaudeMd}` : '',
   ]
     .filter(Boolean)
     .join('\n');
+}
 
+/**
+ * Run a single query using the direct Anthropic Messages API.
+ * Bypasses the Claude Code CLI/SDK to eliminate ~12K tokens of overhead.
+ */
+async function runQuery(
+  prompt: string,
+  sessionId: string | undefined,
+  mcpServerPath: string,
+  containerInput: ContainerInput,
+): Promise<{
+  newSessionId?: string;
+  closedDuringQuery: boolean;
+}> {
+  const systemPrompt = buildSystemPrompt(containerInput.assistantName);
   log(`System prompt: ${systemPrompt.length} chars (~${Math.round(systemPrompt.length / 4)} tokens)`);
 
-  // Strip auto-loaded skills — the CLI discovers .claude/skills/ and injects every
-  // SKILL.md into the system prompt (~4.5K tokens). MCP tools cover all functionality.
-  const skillsDir = '/home/node/.claude/skills';
-  if (fs.existsSync(skillsDir)) {
-    fs.rmSync(skillsDir, { recursive: true, force: true });
-    log('Stripped .claude/skills/ to save ~4.5K tokens');
-  }
+  // Session path — reuse SDK-compatible location so host session tracking works
+  const sessionDir = '/home/node/.claude/projects/-workspace-group';
+  const sid = sessionId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const sessionPath = path.join(sessionDir, `${sid}.jsonl`);
+  fs.mkdirSync(sessionDir, { recursive: true });
 
-  // Neuter settings.json — agent teams and auto-memory add overhead.
-  const settingsPath = '/home/node/.claude/settings.json';
-  fs.writeFileSync(settingsPath, JSON.stringify({ env: {} }));
-  log('Reset .claude/settings.json (disabled agent teams + auto-memory)');
+  // Resolve short model names to full API IDs (SDK did this automatically)
+  const MODEL_ALIASES: Record<string, string> = {
+    sonnet: 'claude-sonnet-4-20250514',
+    opus: 'claude-opus-4-20250514',
+    haiku: 'claude-haiku-4-5-20251001',
+  };
+  const rawModel = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
+  const model = MODEL_ALIASES[rawModel] || rawModel;
 
-  // Minimal tool set — 5 SDK tools instead of 12. Saves ~2K tokens in schemas.
-  // Removed: Edit (use Write), Glob/Grep (use Bash find/grep), Task, SendMessage,
-  // ToolSearch, Skill — all unused or rarely used by the chat assistant.
-  const allowedTools = [
-    'Bash',
-    'Read',
-    'Write',
-    'WebSearch',
-    'mcp__nanoclaw__*',
-  ];
-  log(`[tools] ${allowedTools.length} tool entries: ${allowedTools.join(', ')}`);
-
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt,
-      allowedTools,
-      // Limit agentic turns to prevent runaway tool-call loops.
-      // Interactive: 15 turns is generous for search + follow-up.
-      // Scheduled tasks: 8 turns keeps cost predictable.
-      maxTurns: containerInput.isScheduledTask ? 8 : 15,
-      // Hard budget cap per query — safety net against context explosion.
-      maxBudgetUsd: containerInput.isScheduledTask ? 0.10 : 0.25,
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      // No settingSources — CLAUDE.md is already inlined in systemPrompt.
-      // 'project' would auto-load it again, doubling the tokens.
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-      },
-      hooks: {
-        PreCompact: [
-          { hooks: [createPreCompactHook(containerInput.assistantName)] },
-        ],
-      },
+  const result = await directQuery({
+    prompt,
+    systemPrompt,
+    sessionPath,
+    mcpServerCommand: 'node',
+    mcpServerArgs: [mcpServerPath],
+    mcpServerEnv: {
+      NANOCLAW_CHAT_JID: containerInput.chatJid,
+      NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+      NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
     },
-  })) {
-    messageCount++;
-    const msgType =
-      message.type === 'system'
-        ? `system/${(message as { subtype?: string }).subtype}`
-        : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+    maxTurns: containerInput.isScheduledTask ? 8 : 15,
+    maxBudgetUsd: containerInput.isScheduledTask ? 0.10 : 0.25,
+    model,
+    log,
+  });
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
-
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
-
-    if (
-      message.type === 'system' &&
-      (message as { subtype?: string }).subtype === 'task_notification'
-    ) {
-      const tn = message as {
-        task_id: string;
-        status: string;
-        summary: string;
-      };
-      log(
-        `Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`,
-      );
-    }
-
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult =
-        'result' in message ? (message as { result?: string }).result : null;
-      log(
-        `Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`,
-      );
-      const resultMsg = message as {
-        usage?: {
-          input_tokens?: number;
-          output_tokens?: number;
-          cache_read_input_tokens?: number;
-          cache_creation_input_tokens?: number;
-        };
-        total_cost_usd?: number;
-      };
-      if (resultMsg.usage) {
-        logTokenUsage(
-          newSessionId ?? 'unknown',
-          resultMsg.usage.input_tokens ?? 0,
-          resultMsg.usage.output_tokens ?? 0,
-          resultMsg.usage.cache_read_input_tokens ?? 0,
-          resultMsg.usage.cache_creation_input_tokens ?? 0,
-          resultMsg.total_cost_usd ?? 0,
-        );
-      }
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId,
-      });
-    }
-  }
-
-  ipcPolling = false;
-  log(
-    `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`,
+  // Log token usage
+  logTokenUsage(
+    sid,
+    result.usage.input_tokens,
+    result.usage.output_tokens,
+    result.usage.cache_read_input_tokens,
+    result.usage.cache_creation_input_tokens,
+    result.costUsd,
   );
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+
+  // Emit result
+  writeOutput({
+    status: 'success',
+    result: result.text,
+    newSessionId: sid,
+  });
+
+  log(`Query done. Turns: ${result.turns}, cost: $${result.costUsd.toFixed(4)}`);
+
+  // Check for close sentinel that may have arrived during the query
+  const closedDuringQuery = shouldClose();
+  return { newSessionId: sid, closedDuringQuery };
 }
 
 interface ScriptResult {
@@ -678,15 +347,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Credentials are injected by the host's credential proxy via ANTHROPIC_BASE_URL.
-  // No real secrets exist in the container environment.
-  const sdkEnv: Record<string, string | undefined> = {
-    ...process.env,
-    // Auto-compact at 80K tokens instead of the default 200K.
-    // Keeps resumed sessions lean — each turn resends the full context.
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '80000',
-  };
-
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
@@ -734,26 +394,18 @@ async function main(): Promise<void> {
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
-  let resumeAt: string | undefined;
   try {
     while (true) {
-      log(
-        `Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`,
-      );
+      log(`Starting query (session: ${sessionId || 'new'})...`);
 
       const queryResult = await runQuery(
         prompt,
         sessionId,
         mcpServerPath,
         containerInput,
-        sdkEnv,
-        resumeAt,
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
-      }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
       }
 
       // If _close was consumed during the query, exit immediately.
