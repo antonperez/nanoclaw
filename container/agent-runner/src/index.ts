@@ -19,6 +19,7 @@ import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { directQuery } from './direct-api.js';
 import { runDailyBrief } from './daily-brief.js';
+import { classifyQuery, buildToolFilter } from './query-classifier.js';
 
 interface ContainerInput {
   prompt: string;
@@ -178,36 +179,6 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
- * Classify a query to select the cheapest adequate model.
- * Returns Haiku for scheduled tasks, short single-turn lookups, and simple patterns.
- * Falls back to Sonnet for everything else.
- */
-function classifyQuery(
-  prompt: string,
-  isScheduledTask: boolean,
-  hasSession: boolean,
-): { model: string; reason: string } {
-  // Scheduled tasks always use Haiku (daily briefs, reminders, etc.)
-  if (isScheduledTask) {
-    return { model: 'claude-haiku-4-5-20251001', reason: 'scheduled-task' };
-  }
-
-  // Short prompts with no session history → Haiku for single-turn lookups
-  if (!hasSession && prompt.length < 200) {
-    return { model: 'claude-haiku-4-5-20251001', reason: 'short-no-history' };
-  }
-
-  // Simple patterns that don't need Sonnet's reasoning
-  const simplePatterns = /^(hi|hello|hey|good morning|good evening|what time|what day|what date|thank|thanks|ok|okay|gm|gn)\b/i;
-  if (simplePatterns.test(prompt.trim())) {
-    return { model: 'claude-haiku-4-5-20251001', reason: 'simple-pattern' };
-  }
-
-  // Default to Sonnet
-  return { model: 'claude-sonnet-4-20250514', reason: 'default-sonnet' };
-}
-
-/**
  * Build the system prompt from template + group CLAUDE.md.
  */
 function buildSystemPrompt(assistantName?: string): string {
@@ -292,6 +263,13 @@ async function runQuery(
     return { newSessionId: sid, closedDuringQuery: false };
   }
 
+  // Conditional tool loading — only include tools the prompt actually needs
+  const toolFilter = buildToolFilter(prompt, containerInput.isMain);
+
+  // D: Zero history for scheduled tasks (stateless), E: lower max_tokens for simple queries
+  const isScheduled = containerInput.isScheduledTask ?? false;
+  const isSimple = routing.reason === 'simple-pattern' || routing.reason === 'short-no-history';
+
   const result = await directQuery({
     prompt,
     systemPrompt,
@@ -303,9 +281,12 @@ async function runQuery(
       NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
       NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
     },
-    maxTurns: containerInput.isScheduledTask ? 8 : 15,
-    maxBudgetUsd: containerInput.isScheduledTask ? 0.10 : 0.25,
+    maxTurns: isScheduled ? 8 : 15,
+    maxBudgetUsd: isScheduled ? 0.10 : 0.25,
     model,
+    maxHistoryTokens: isScheduled ? 0 : 4000,
+    maxResponseTokens: isSimple ? 512 : 4096,
+    toolFilter,
     log,
   });
 

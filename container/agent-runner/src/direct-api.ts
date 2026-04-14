@@ -30,6 +30,9 @@ interface DirectQueryOptions {
   maxTurns: number;
   maxBudgetUsd: number;
   model: string;
+  maxHistoryTokens?: number;
+  maxResponseTokens?: number;
+  toolFilter?: (tool: ToolDef) => boolean;
   log: (msg: string) => void;
 }
 
@@ -307,10 +310,13 @@ export async function directQuery(
     log,
   );
 
-  // Combine tool definitions
-  const allTools: ToolDef[] = [...BUILTIN_TOOLS, ...mcp.tools];
+  // Combine tool definitions, apply optional filter
+  let allTools: ToolDef[] = [...BUILTIN_TOOLS, ...mcp.tools];
+  if (options.toolFilter) {
+    allTools = allTools.filter(options.toolFilter);
+  }
   log(
-    `Tools: ${allTools.length} (${BUILTIN_TOOLS.length} built-in + ${mcp.tools.length} MCP)`,
+    `Tools: ${allTools.length} loaded${options.toolFilter ? ' (filtered)' : ''}`,
   );
 
   // Load or start session
@@ -324,7 +330,7 @@ export async function directQuery(
   // Token-budget session truncation: estimate message tokens and trim from
   // the front when total history exceeds the budget. More accurate than a
   // flat message count since tool-result messages vary wildly in size.
-  const MAX_HISTORY_TOKENS = 4000;
+  const MAX_HISTORY_TOKENS = options.maxHistoryTokens ?? 4000;
   const estimateTokens = (msg: Message): number => {
     if (typeof msg.content === 'string') return Math.ceil(msg.content.length / 4);
     if (Array.isArray(msg.content)) {
@@ -363,7 +369,7 @@ export async function directQuery(
 
       const response = await client.messages.create({
         model: options.model,
-        max_tokens: 4096,
+        max_tokens: options.maxResponseTokens ?? 4096,
         system: [
           {
             type: 'text',
