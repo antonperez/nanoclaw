@@ -49,11 +49,11 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  'Send a message to the user/group immediately. Can call multiple times for progress updates.',
+  'Send a message to the user/group.',
   {
-    text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-    chat_jid: z.string().optional().describe('Target chat JID. Defaults to the current chat. Use to send to a different chat (e.g. a team group).'),
+    text: z.string().describe('Message text'),
+    sender: z.string().optional().describe('Bot identity name, e.g. "Researcher"'),
+    chat_jid: z.string().optional().describe('Target chat JID (default: current chat)'),
   },
   async (args) => {
     // If a sender (worker bot identity) is set and a team chat is configured,
@@ -78,35 +78,13 @@ server.tool(
 
 server.tool(
   'schedule_task',
-  'Schedule a recurring or one-time task. Returns task ID. Use update_task to modify existing tasks. All times are LOCAL timezone — no Z suffix for "once" type.',
+  'Schedule a recurring or one-time task. All times LOCAL (no Z suffix).',
   {
-    prompt: z
-      .string()
-      .describe(
-        'What the agent should do when the task runs. For isolated mode, include all necessary context here.',
-      ),
-    schedule_type: z
-      .enum(['cron', 'interval', 'once'])
-      .describe(
-        'cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time',
-      ),
-    schedule_value: z
-      .string()
-      .describe(
-        'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)',
-      ),
-    target_group_jid: z
-      .string()
-      .optional()
-      .describe(
-        '(Main group only) JID of the group to schedule the task for. Defaults to the current group.',
-      ),
-    script: z
-      .string()
-      .optional()
-      .describe(
-        'Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.',
-      ),
+    prompt: z.string().describe('Task prompt with full context'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron | interval (ms) | once'),
+    schedule_value: z.string().describe('cron: "0 9 * * *" | interval: "300000" | once: "2026-02-01T15:30:00"'),
+    target_group_jid: z.string().optional().describe('Target group JID (main only)'),
+    script: z.string().optional().describe('Bash script; must output JSON: {"wakeAgent":bool,"data":any}'),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -200,7 +178,7 @@ server.tool(
 
 server.tool(
   'list_tasks',
-  "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
+  'List scheduled tasks for this group.',
   {},
   async () => {
     const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
@@ -262,38 +240,15 @@ server.tool(
 );
 
 server.tool(
-  'pause_task',
-  'Pause a scheduled task. It will not run until resumed.',
-  { task_id: z.string().describe('The task ID to pause') },
-  async (args) => {
-    const data = {
-      type: 'pause_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} pause requested.`,
-        },
-      ],
-    };
+  'task_action',
+  'Pause, resume, or cancel a scheduled task.',
+  {
+    task_id: z.string().describe('Task ID'),
+    action: z.enum(['pause', 'resume', 'cancel']).describe('Action to perform'),
   },
-);
-
-server.tool(
-  'resume_task',
-  'Resume a paused task.',
-  { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
     const data = {
-      type: 'resume_task',
+      type: `${args.action}_task`,
       taskId: args.task_id,
       groupFolder,
       isMain,
@@ -306,33 +261,7 @@ server.tool(
       content: [
         {
           type: 'text' as const,
-          text: `Task ${args.task_id} resume requested.`,
-        },
-      ],
-    };
-  },
-);
-
-server.tool(
-  'cancel_task',
-  'Cancel and delete a scheduled task.',
-  { task_id: z.string().describe('The task ID to cancel') },
-  async (args) => {
-    const data = {
-      type: 'cancel_task',
-      taskId: args.task_id,
-      groupFolder,
-      isMain,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Task ${args.task_id} cancellation requested.`,
+          text: `Task ${args.task_id} ${args.action} requested.`,
         },
       ],
     };
@@ -341,24 +270,13 @@ server.tool(
 
 server.tool(
   'update_task',
-  'Update an existing scheduled task. Only provided fields are changed; omitted fields stay the same.',
+  'Update a scheduled task. Only provided fields change.',
   {
-    task_id: z.string().describe('The task ID to update'),
-    prompt: z.string().optional().describe('New prompt for the task'),
-    schedule_type: z
-      .enum(['cron', 'interval', 'once'])
-      .optional()
-      .describe('New schedule type'),
-    schedule_value: z
-      .string()
-      .optional()
-      .describe('New schedule value (see schedule_task for format)'),
-    script: z
-      .string()
-      .optional()
-      .describe(
-        'New script for the task. Set to empty string to remove the script.',
-      ),
+    task_id: z.string().describe('Task ID'),
+    prompt: z.string().optional().describe('New prompt'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New type'),
+    schedule_value: z.string().optional().describe('New schedule value'),
+    script: z.string().optional().describe('New script (empty string to remove)'),
   },
   async (args) => {
     // Validate schedule_value if provided
@@ -426,26 +344,13 @@ server.tool(
 
 server.tool(
   'register_group',
-  'Register a new chat/group. Main group only. Folder must be channel-prefixed: "{channel}_{name}" (e.g. "telegram_dev-team").',
+  'Register a new chat/group (main group only).',
   {
-    jid: z
-      .string()
-      .describe(
-        'The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")',
-      ),
-    name: z.string().describe('Display name for the group'),
-    folder: z
-      .string()
-      .describe(
-        'Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")',
-      ),
-    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
-    requiresTrigger: z
-      .boolean()
-      .optional()
-      .describe(
-        'Whether messages must start with the trigger word. Default: false (respond to all messages). Set to true for busy groups with many participants where you only want the agent to respond when explicitly mentioned.',
-      ),
+    jid: z.string().describe('Chat JID'),
+    name: z.string().describe('Display name'),
+    folder: z.string().describe('Channel-prefixed folder, e.g. "telegram_dev-team"'),
+    trigger: z.string().describe('Trigger word, e.g. "@Andy"'),
+    requiresTrigger: z.boolean().optional().describe('Require trigger word (default: false)'),
   },
   async (args) => {
     if (!isMain) {
@@ -485,17 +390,14 @@ server.tool(
 
 server.tool(
   'send_email',
-  'Send an email via iCloud SMTP. Use for notifications, summaries, or any content better delivered by email. Attachments can be any file previously saved to /workspace/group/files/ (e.g. from a Telegram upload).',
+  'Send an email via iCloud SMTP.',
   {
-    to: z.string().describe('Recipient email address'),
-    subject: z.string().describe('Email subject line'),
-    body: z.string().describe('Email body (plain text)'),
-    cc: z.string().optional().describe('CC email address(es), comma-separated'),
-    bcc: z.string().optional().describe('BCC email address(es), comma-separated'),
-    attachments: z
-      .array(z.string())
-      .optional()
-      .describe('Absolute paths to files to attach, e.g. ["/workspace/group/files/report.pdf"]'),
+    to: z.string().describe('Recipient'),
+    subject: z.string().describe('Subject'),
+    body: z.string().describe('Body (plain text)'),
+    cc: z.string().optional().describe('CC (comma-separated)'),
+    bcc: z.string().optional().describe('BCC (comma-separated)'),
+    attachments: z.array(z.string()).optional().describe('File paths to attach'),
   },
   async (args) => {
     const data: Record<string, string | string[] | undefined> = {
@@ -540,14 +442,14 @@ async function davFetch(
 
 server.tool(
   'caldav_request',
-  'Make an authenticated CalDAV request to iCloud Calendar. Credentials are injected automatically. Supports PROPFIND, REPORT, GET, PUT, DELETE, MKCALENDAR. Redirects followed automatically.',
+  'Authenticated CalDAV request to iCloud Calendar.',
   {
     method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE', 'MKCALENDAR']).describe('HTTP method'),
-    path: z.string().describe('Path on caldav.icloud.com (e.g. /.well-known/caldav or /1234567890/calendars/)'),
-    body: z.string().optional().describe('Request body — XML for PROPFIND/REPORT, iCal for PUT'),
-    depth: z.enum(['0', '1', 'infinity']).optional().describe('DAV Depth header (for PROPFIND/REPORT)'),
-    content_type: z.string().optional().describe('Content-Type override (default: application/xml). Use text/calendar for PUT with iCal data.'),
-    etag: z.string().optional().describe('ETag for conditional updates (sets If-Match header)'),
+    path: z.string().describe('CalDAV path'),
+    body: z.string().optional().describe('XML or iCal body'),
+    depth: z.enum(['0', '1', 'infinity']).optional().describe('Depth header'),
+    content_type: z.string().optional().describe('Content-Type override'),
+    etag: z.string().optional().describe('If-Match ETag'),
   },
   async (args) => {
     try {
@@ -565,14 +467,14 @@ server.tool(
 
 server.tool(
   'carddav_request',
-  'Make an authenticated CardDAV request to iCloud Contacts. Credentials are injected automatically. Supports PROPFIND, REPORT, GET, PUT, DELETE. Redirects followed automatically.',
+  'Authenticated CardDAV request to iCloud Contacts.',
   {
     method: z.enum(['PROPFIND', 'REPORT', 'GET', 'PUT', 'DELETE']).describe('HTTP method'),
-    path: z.string().describe('Path on contacts.icloud.com (e.g. /.well-known/carddav)'),
-    body: z.string().optional().describe('Request body — XML for PROPFIND/REPORT, vCard for PUT'),
-    depth: z.enum(['0', '1', 'infinity']).optional().describe('DAV Depth header'),
-    content_type: z.string().optional().describe('Content-Type override (default: application/xml). Use text/vcard for PUT.'),
-    etag: z.string().optional().describe('ETag for conditional updates (sets If-Match header)'),
+    path: z.string().describe('CardDAV path'),
+    body: z.string().optional().describe('XML or vCard body'),
+    depth: z.enum(['0', '1', 'infinity']).optional().describe('Depth header'),
+    content_type: z.string().optional().describe('Content-Type override'),
+    etag: z.string().optional().describe('If-Match ETag'),
   },
   async (args) => {
     try {
@@ -643,9 +545,9 @@ function extractNewsHtml(html: string): string {
 
 server.tool(
   'web_fetch',
-  'Fetch a URL. Returns truncated text (~500 tokens max). News returns headline only, weather returns structured data.',
+  'Fetch a URL. Returns truncated text (~500 tokens).',
   {
-    url: z.string().describe('The URL to fetch'),
+    url: z.string().describe('URL to fetch'),
   },
   async (args) => {
     const MAX_CHARS = 2000;
