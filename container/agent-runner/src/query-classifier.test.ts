@@ -55,14 +55,13 @@ describe('buildToolFilter', () => {
   const allTools = [
     'bash', 'read_file', 'write_file',
     'mcp__nanoclaw__send_message', 'mcp__nanoclaw__web_fetch',
-    'mcp__nanoclaw__schedule_task', 'mcp__nanoclaw__list_tasks',
-    'mcp__nanoclaw__task_action', 'mcp__nanoclaw__update_task',
-    'mcp__nanoclaw__send_email', 'mcp__nanoclaw__caldav_request',
-    'mcp__nanoclaw__carddav_request', 'mcp__nanoclaw__register_group',
+    'mcp__nanoclaw__manage_tasks',
+    'mcp__nanoclaw__send_email', 'mcp__nanoclaw__dav_request',
+    'mcp__nanoclaw__register_group',
   ].map(name => ({ name }));
 
-  function filterNames(prompt: string, isMain = true): string[] {
-    const filter = buildToolFilter(prompt, isMain);
+  function filterNames(prompt: string, isMain = true, routingReason?: string): string[] {
+    const filter = buildToolFilter(prompt, isMain, routingReason);
     return allTools.filter(filter).map(t => t.name);
   }
 
@@ -77,20 +76,15 @@ describe('buildToolFilter', () => {
 
   it('excludes task tools for simple prompt', () => {
     const names = filterNames('hello');
-    expect(names).not.toContain('mcp__nanoclaw__schedule_task');
-    expect(names).not.toContain('mcp__nanoclaw__list_tasks');
+    expect(names).not.toContain('mcp__nanoclaw__manage_tasks');
     expect(names).not.toContain('mcp__nanoclaw__send_email');
-    expect(names).not.toContain('mcp__nanoclaw__caldav_request');
-    expect(names).not.toContain('mcp__nanoclaw__carddav_request');
+    expect(names).not.toContain('mcp__nanoclaw__dav_request');
     expect(names).not.toContain('mcp__nanoclaw__register_group');
   });
 
-  it('includes task tools when prompt mentions scheduling', () => {
+  it('includes manage_tasks when prompt mentions scheduling', () => {
     const names = filterNames('schedule a reminder for tomorrow');
-    expect(names).toContain('mcp__nanoclaw__schedule_task');
-    expect(names).toContain('mcp__nanoclaw__list_tasks');
-    expect(names).toContain('mcp__nanoclaw__task_action');
-    expect(names).toContain('mcp__nanoclaw__update_task');
+    expect(names).toContain('mcp__nanoclaw__manage_tasks');
   });
 
   it('includes email tool when prompt mentions email', () => {
@@ -100,13 +94,13 @@ describe('buildToolFilter', () => {
 
   it('includes calendar tools when prompt mentions events', () => {
     const names = filterNames('check my calendar events');
-    expect(names).toContain('mcp__nanoclaw__caldav_request');
-    expect(names).toContain('mcp__nanoclaw__schedule_task');
+    expect(names).toContain('mcp__nanoclaw__dav_request');
+    expect(names).toContain('mcp__nanoclaw__manage_tasks');
   });
 
-  it('includes contacts tool when prompt mentions contacts', () => {
+  it('includes dav_request when prompt mentions contacts', () => {
     const names = filterNames('find phone number for Sarah');
-    expect(names).toContain('mcp__nanoclaw__carddav_request');
+    expect(names).toContain('mcp__nanoclaw__dav_request');
   });
 
   it('includes register_group only from main', () => {
@@ -122,8 +116,27 @@ describe('buildToolFilter', () => {
     expect(names).toHaveLength(5);
   });
 
-  it('task prompt loads core + 4 task tools = 9', () => {
+  it('task prompt loads core + 1 manage_tasks tool = 6', () => {
     const names = filterNames('schedule a task for 9am');
-    expect(names).toHaveLength(9);
+    expect(names).toHaveLength(6);
+  });
+
+  it('minimal mode: simple-pattern routing returns only send_message', () => {
+    const names = filterNames('hi', true, 'simple-pattern');
+    expect(names).toEqual(['mcp__nanoclaw__send_message']);
+    expect(names).toHaveLength(1);
+  });
+
+  it('minimal mode: does not include bash, read_file, web_fetch', () => {
+    const names = filterNames('thanks', true, 'simple-pattern');
+    expect(names).not.toContain('bash');
+    expect(names).not.toContain('read_file');
+    expect(names).not.toContain('write_file');
+    expect(names).not.toContain('mcp__nanoclaw__web_fetch');
+  });
+
+  it('without routingReason still returns 5 core tools for simple prompt', () => {
+    const names = filterNames('what is the weather?', true, undefined);
+    expect(names).toHaveLength(5);
   });
 });

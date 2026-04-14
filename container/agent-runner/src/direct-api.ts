@@ -152,45 +152,36 @@ function writeFile(filePath: string, content: string): string {
 const BUILTIN_TOOLS: ToolDef[] = [
   {
     name: 'bash',
-    description:
-      'Run a shell command. Working directory is /workspace/group. Timeout: 30s.',
+    description: 'Run shell command in /workspace/group. 30s timeout.',
     input_schema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'The shell command to execute' },
+        command: { type: 'string' },
       },
       required: ['command'],
     },
   },
   {
     name: 'read_file',
-    description:
-      'Read a file. Returns numbered lines. Path is relative to /workspace/group or absolute.',
+    description: 'Read file (numbered lines). Path relative to /workspace/group or absolute.',
     input_schema: {
       type: 'object',
       properties: {
-        file_path: { type: 'string', description: 'Path to read' },
-        offset: {
-          type: 'number',
-          description: 'Start line (0-based). Optional.',
-        },
-        limit: {
-          type: 'number',
-          description: 'Max lines to read. Optional.',
-        },
+        file_path: { type: 'string' },
+        offset: { type: 'number', description: 'Start line (0-based)' },
+        limit: { type: 'number', description: 'Max lines' },
       },
       required: ['file_path'],
     },
   },
   {
     name: 'write_file',
-    description:
-      'Write content to a file. Creates directories as needed. Path relative to /workspace/group or absolute.',
+    description: 'Write file, creates dirs. Path relative to /workspace/group or absolute.',
     input_schema: {
       type: 'object',
       properties: {
-        file_path: { type: 'string', description: 'Path to write' },
-        content: { type: 'string', description: 'File content' },
+        file_path: { type: 'string' },
+        content: { type: 'string' },
       },
       required: ['file_path', 'content'],
     },
@@ -268,6 +259,105 @@ async function callMcpTool(
   return text || JSON.stringify(result.content);
 }
 
+// --- Token estimation (module-scope for use in compression + truncation) ---
+
+function estimateTokens(msg: Message): number {
+  if (typeof msg.content === 'string') return Math.ceil(msg.content.length / 4);
+  if (Array.isArray(msg.content)) {
+    return msg.content.reduce((sum, block) => {
+      if ('text' in block && typeof block.text === 'string') return sum + Math.ceil(block.text.length / 4);
+      if ('content' in block && typeof block.content === 'string') return sum + Math.ceil(block.content.length / 4);
+      return sum + 50; // tool_use blocks etc
+    }, 0);
+  }
+  return 50;
+}
+
+// --- Sliding window history compression ---
+
+async function compressHistory(
+  messages: Message[],
+  log: (msg: string) => void,
+): Promise<{
+  messages: Message[];
+  compressed: boolean;
+  tokensBefore: number;
+  tokensAfter: number;
+  compressionUsage?: { input_tokens: number; output_tokens: number };
+}> {
+  const THRESHOLD = 10;
+  const KEEP_COUNT = 4;
+
+  const tokensBefore = messages.reduce((s, m) => s + estimateTokens(m), 0);
+
+  if (messages.length <= THRESHOLD) {
+    return { messages, compressed: false, tokensBefore, tokensAfter: tokensBefore };
+  }
+
+  const toCompress = messages.slice(0, messages.length - KEEP_COUNT);
+  const toKeep = messages.slice(messages.length - KEEP_COUNT);
+
+  // Build a text transcript of old messages for the summarizer
+  const transcript = toCompress.map((m) => {
+    const role = m.role;
+    const text =
+      typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? m.content
+              .filter((b) => 'text' in b)
+              .map((b) => (b as { text: string }).text)
+              .join(' ')
+          : '[non-text]';
+    return `${role}: ${text.slice(0, 500)}`;
+  }).join('\n');
+
+  try {
+    const haiku = new Anthropic();
+    const summaryResponse = await haiku.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [
+        {
+          role: 'user',
+          content: `Summarize this conversation context in 2-3 sentences. Preserve key facts, decisions, and any task state. Be extremely concise.\n\n${transcript.slice(0, 3000)}`,
+        },
+      ],
+    });
+
+    const summaryText = summaryResponse.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as { type: 'text'; text: string }).text)
+      .join(' ');
+
+    const summaryMessage: Message = {
+      role: 'user',
+      content: `[Previous conversation context]\n${summaryText}`,
+    };
+
+    const compressed = [summaryMessage, ...toKeep];
+    const tokensAfter = compressed.reduce((s, m) => s + estimateTokens(m), 0);
+
+    log(
+      `History compressed: ${messages.length} msgs (~${tokensBefore} tok) → ${compressed.length} msgs (~${tokensAfter} tok)`,
+    );
+
+    return {
+      messages: compressed,
+      compressed: true,
+      tokensBefore,
+      tokensAfter,
+      compressionUsage: {
+        input_tokens: summaryResponse.usage.input_tokens,
+        output_tokens: summaryResponse.usage.output_tokens,
+      },
+    };
+  } catch (err) {
+    log(`History compression warning: ${err instanceof Error ? err.message : String(err)} — skipping compression`);
+    return { messages, compressed: false, tokensBefore, tokensAfter: tokensBefore };
+  }
+}
+
 // --- Session persistence ---
 
 export function loadSession(sessionPath: string): Message[] {
@@ -327,21 +417,36 @@ export async function directQuery(
     content: options.prompt,
   });
 
+  // Accumulate usage across turns (declared early so compression cost can be added)
+  const totalUsage: DirectQueryResult['usage'] = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
+
   // Token-budget session truncation: estimate message tokens and trim from
   // the front when total history exceeds the budget. More accurate than a
   // flat message count since tool-result messages vary wildly in size.
   const MAX_HISTORY_TOKENS = options.maxHistoryTokens ?? 4000;
-  const estimateTokens = (msg: Message): number => {
-    if (typeof msg.content === 'string') return Math.ceil(msg.content.length / 4);
-    if (Array.isArray(msg.content)) {
-      return msg.content.reduce((sum, block) => {
-        if ('text' in block && typeof block.text === 'string') return sum + Math.ceil(block.text.length / 4);
-        if ('content' in block && typeof block.content === 'string') return sum + Math.ceil(block.content.length / 4);
-        return sum + 50; // tool_use blocks etc
-      }, 0);
+
+  // Sliding window compression: summarize old messages via Haiku before truncation.
+  // Skip for scheduled tasks that use 0 history (stateless by design).
+  if (MAX_HISTORY_TOKENS > 0) {
+    const compression = await compressHistory(messages, log);
+    if (compression.compressed) {
+      messages.length = 0;
+      messages.push(...compression.messages);
     }
-    return 50;
-  };
+    if (compression.compressionUsage) {
+      totalUsage.input_tokens += compression.compressionUsage.input_tokens;
+      totalUsage.output_tokens += compression.compressionUsage.output_tokens;
+      log(
+        `Compression cost: ${compression.compressionUsage.input_tokens} in + ${compression.compressionUsage.output_tokens} out (Haiku)`,
+      );
+    }
+  }
+
   let historyTokens = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
   while (historyTokens > MAX_HISTORY_TOKENS && messages.length > 1) {
     historyTokens -= estimateTokens(messages[0]);
@@ -350,14 +455,6 @@ export async function directQuery(
   if (historyTokens > 0) {
     log(`Session history: ${messages.length} messages, ~${historyTokens} tokens`);
   }
-
-  // Accumulate usage across turns
-  const totalUsage: DirectQueryResult['usage'] = {
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_input_tokens: 0,
-    cache_creation_input_tokens: 0,
-  };
 
   let turns = 0;
   let finalText: string | null = null;
