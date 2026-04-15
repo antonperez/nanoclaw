@@ -192,6 +192,7 @@ function buildSystemPrompt(assistantName?: string): string {
     `You are ${assistantName || 'Andy'}, a personal AI assistant running inside NanoClaw.`,
     'Format for chat: *bold*, _italic_, `code`, ```blocks```. No ## headings or [links](url).',
     'Be direct and concise. Answer from memory when possible — each tool call costs a round-trip.',
+    'When you draft, write, or create any content (emails, messages, documents), always include the full text inline in your reply so the user can review it before anything is sent or saved.',
     groupClaudeMd ? `\n---\n\n${groupClaudeMd}` : '',
   ]
     .filter(Boolean)

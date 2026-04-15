@@ -1,0 +1,69 @@
+[01:33:46.130] [32mINFO[39m (557467): [36mStarting container runtime...[39m
+[01:33:46.160] [32mINFO[39m (557467): [36mContainer runtime started[39m
+[01:33:47.561] [32mINFO[39m (557467): [36mStopped orphaned containers[39m
+    [35mcount[39m: 1
+    [35mnames[39m: ["nanoclaw-telegram-main-1776100601964"]
+[01:33:47.572] [32mINFO[39m (557467): [36mDatabase initialized[39m
+[01:33:47.575] [32mINFO[39m (557467): [36mState loaded[39m
+    [35mgroupCount[39m: 1
+[01:33:47.588] [32mINFO[39m (557467): [36mCredential proxy started[39m
+    [35mport[39m: 3001
+    [35mhost[39m: "172.17.0.1"
+    [35mauthMode[39m: "setup-token"
+[01:33:47.589] [32mINFO[39m (557467): [36mWatchdog started[39m
+    [35mtimeoutMs[39m: 2100000
+[01:33:48.393] [32mINFO[39m (557467): [36mTelegram bot connected[39m
+    [35musername[39m: "ilfraffBot"
+    [35mid[39m: 8777561404
+
+  Telegram bot: @ilfraffBot
+  Send /chatid to the bot to get a chat's registration ID
+
+[01:33:48.589] [32mINFO[39m (557467): [36mPool bot initialized[39m
+    [35musername[39m: "ilfraff2Bot"
+    [35mid[39m: 8646599207
+    [35mpoolSize[39m: 1
+[01:33:48.779] [32mINFO[39m (557467): [36mPool bot initialized[39m
+    [35musername[39m: "ilfraff3Bot"
+    [35mid[39m: 8226396863
+    [35mpoolSize[39m: 2
+[01:33:48.967] [32mINFO[39m (557467): [36mPool bot initialized[39m
+    [35musername[39m: "ilfraff4Bot"
+    [35mid[39m: 8780863417
+    [35mpoolSize[39m: 3
+[01:33:49.157] [32mINFO[39m (557467): [36mPool bot initialized[39m
+    [35musername[39m: "ilfraff5Bot"
+    [35mid[39m: 8749238655
+    [35mpoolSize[39m: 4
+[01:33:49.157] [32mINFO[39m (557467): [36mTelegram bot pool ready[39m
+    [35mcount[39m: 4
+[01:33:49.158] [32mINFO[39m (557467): [36mScheduler loop started[39m
+[01:33:49.164] [32mINFO[39m (557467): [36mIPC watcher started (per-group namespaces)[39m
+[01:33:49.166] [32mINFO[39m (557467): [36mNanoClaw running (default trigger: @Andy)[39m
+[01:34:20.176] [32mINFO[39m (557467): [36m[cleanup] Done — freed ~0K[39m
+[01:35:02.572] [32mINFO[39m (557467): [36mTelegram message stored[39m
+    [35mchatJid[39m: "tg:5428364150"
+    [35mchatName[39m: "Anton"
+    [35msender[39m: "Anton"
+[01:35:03.247] [32mINFO[39m (557467): [36mNew messages[39m
+    [35mcount[39m: 1
+[01:35:03.378] [32mINFO[39m (557467): [36mProcessing messages[39m
+    [35mgroup[39m: "Telegram Main"
+    [35mmessageCount[39m: 1
+    [35mmodel[39m: "claude"
+    [35mreason[39m: "default"
+[01:35:04.113] [32mINFO[39m (557467): [36mMount allowlist loaded successfully[39m
+    [35mpath[39m: "/home/anton/.config/nanoclaw/mount-allowlist.json"
+    [35mallowedRoots[39m: 2
+    [35mblockedPatterns[39m: 17
+[01:35:04.117] [32mINFO[39m (557467): [36mSpawning container agent[39m
+    [35mgroup[39m: "Telegram Main"
+    [35mcontainerName[39m: "nanoclaw-telegram-main-1776101704115"
+    [35mmountCount[39m: 8
+    [35misMain[39m: true
+[01:35:08.177] [32mINFO[39m (557467): [36mShutdown signal received[39m
+    [35msignal[39m: "SIGTERM"
+[01:35:08.178] [32mINFO[39m (557467): [36mGroupQueue shutting down (containers detached, not killed)[39m
+    [35mactiveCount[39m: 1
+    [35mdetachedContainers[39m: ["nanoclaw-telegram-main-1776101704115"]
+[01:35:08.185] [32mINFO[39m (557467): [36mTelegram bot stopped[39m
