@@ -282,7 +282,7 @@ async function runQuery(
     maxTurns: isScheduled ? 8 : 15,
     maxBudgetUsd: isScheduled ? 0.10 : 0.25,
     model,
-    maxHistoryTokens: isScheduled ? 0 : 4000,
+    maxHistoryTokens: isScheduled ? 0 : 24000,
     maxResponseTokens: isSimple ? 512 : 4096,
     toolFilter,
     log,
