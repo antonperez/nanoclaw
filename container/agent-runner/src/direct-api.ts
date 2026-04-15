@@ -315,7 +315,9 @@ async function compressHistory(
   // landed in toCompress — the API rejects orphaned tool_result blocks.
   stripOrphanedHead(toKeep);
 
-  // Build a text transcript of old messages for the summarizer
+  // Build a text transcript of old messages for the summarizer.
+  // Include text blocks, tool_result content (email bodies, API responses),
+  // and tool_use names so the summary preserves actionable context.
   const transcript = toCompress.map((m) => {
     const role = m.role;
     const text =
@@ -323,11 +325,19 @@ async function compressHistory(
         ? m.content
         : Array.isArray(m.content)
           ? m.content
-              .filter((b) => 'text' in b)
-              .map((b) => (b as { text: string }).text)
+              .map((b) => {
+                const block = b as unknown as Record<string, unknown>;
+                if (typeof block.text === 'string') return block.text;
+                if (block.type === 'tool_result' && typeof block.content === 'string')
+                  return `[tool result: ${block.content.slice(0, 300)}]`;
+                if (block.type === 'tool_use' && typeof block.name === 'string')
+                  return `[tool call: ${block.name}]`;
+                return '';
+              })
+              .filter(Boolean)
               .join(' ')
           : '[non-text]';
-    return `${role}: ${text.slice(0, 500)}`;
+    return `${role}: ${text.slice(0, 600)}`;
   }).join('\n');
 
   try {
