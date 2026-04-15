@@ -13,6 +13,7 @@ export function escapeXml(s: string): string {
 export function formatMessages(
   messages: NewMessage[],
   timezone: string,
+  memoryContext?: string,
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
@@ -27,8 +28,9 @@ export function formatMessages(
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+  const memBlock = memoryContext ? `${memoryContext}\n` : '';
 
-  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+  return `${header}${memBlock}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {
