@@ -62,13 +62,13 @@ function buildSections(date: string): BriefSection[] {
     },
     {
       name: 'Holiday Alert',
-      model: SONNET,
+      model: HAIKU,
       prompt: `Check PH public holidays for ${date}. Run: curl -s "https://date.nager.at/api/v3/PublicHolidays/2026/PH" and find any holiday matching today's date (month/day). Output 1 line: holiday name, or "No PH holiday today." You MUST use the bash tool.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'Today in History',
-      model: HAIKU,
+      model: SONNET,
       prompt: `What happened on this day (${date}) in history? Pick 2-3 interesting events from different eras. Be concise — one line per event. Use your training data.`,
       tools: [],
     },

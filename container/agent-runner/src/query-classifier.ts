@@ -43,6 +43,13 @@ export function classifyQuery(
   if (simplePatterns.test(prompt.trim())) {
     return { model: HAIKU, reason: 'simple-pattern' };
   }
+  // Single-turn factual lookups with no prior session — no reasoning needed
+  if (!hasSession) {
+    const factualPatterns = /^(what is|what's|who is|who's|when is|when was|where is|where was|how many|how much|define|convert|translate)\b/i;
+    if (factualPatterns.test(prompt.trim())) {
+      return { model: HAIKU, reason: 'factual-lookup' };
+    }
+  }
   return { model: SONNET, reason: 'default-sonnet' };
 }
 
