@@ -36,19 +36,12 @@ export function classifyQuery(
   if (isScheduledTask) {
     return { model: HAIKU, reason: 'scheduled-task' };
   }
-  if (!hasSession && prompt.length < 200) {
+  if (!hasSession && prompt.length < 100) {
     return { model: HAIKU, reason: 'short-no-history' };
   }
   const simplePatterns = /^(hi|hello|hey|good morning|good evening|what time|what day|what date|thank|thanks|ok|okay|gm|gn)\b/i;
   if (simplePatterns.test(prompt.trim())) {
     return { model: HAIKU, reason: 'simple-pattern' };
-  }
-  // Plain Q&A under 300 chars — no tool keywords detected
-  if (prompt.length < 300) {
-    const needsTools = TOOL_TRIGGERS.some(({ pattern }) => pattern.test(prompt));
-    if (!needsTools) {
-      return { model: HAIKU, reason: 'short-no-tools' };
-    }
   }
   return { model: SONNET, reason: 'default-sonnet' };
 }

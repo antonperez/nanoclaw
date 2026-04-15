@@ -56,13 +56,13 @@ function buildSections(date: string): BriefSection[] {
   return [
     {
       name: 'Manila Weather',
-      model: HAIKU,
+      model: SONNET,
       prompt: `Fetch current weather in Manila, Philippines. Run: curl -s "https://wttr.in/Manila?format=j1" and extract current_condition[0]: temp_C, weatherDesc, humidity, precipMM. Output 2 lines max: temp + conditions, then rain/alert if any. You MUST use the bash tool — no training data.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'Holiday Alert',
-      model: HAIKU,
+      model: SONNET,
       prompt: `Check PH public holidays for ${date}. Run: curl -s "https://date.nager.at/api/v3/PublicHolidays/2026/PH" and find any holiday matching today's date (month/day). Output 1 line: holiday name, or "No PH holiday today." You MUST use the bash tool.`,
       tools: [BASH_TOOL],
     },
@@ -74,19 +74,19 @@ function buildSections(date: string): BriefSection[] {
     },
     {
       name: 'AI & Agents',
-      model: HAIKU,
+      model: SONNET,
       prompt: `Top 2-3 AI and agent news from the past 24h. You MUST run: curl -s "https://hn.algolia.com/api/v1/search?tags=story&query=AI+agent+LLM&hitsPerPage=5" and extract title+url from hits[]. Output one line per item: headline — source. Do not use training data.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'DevSecOps & Cloud',
-      model: HAIKU,
+      model: SONNET,
       prompt: `Top 2-3 DevSecOps/cloud headlines from the past 24h. You MUST run: curl -s "https://hn.algolia.com/api/v1/search?tags=story&query=kubernetes+AWS+security+cloud&hitsPerPage=5" and extract title+url from hits[]. Output one line per item. Do not use training data.`,
       tools: [BASH_TOOL],
     },
     {
       name: 'PH Banking & Fintech',
-      model: HAIKU,
+      model: SONNET,
       prompt: `Top 2-3 PH banking/fintech headlines. You MUST run: curl -s "https://hn.algolia.com/api/v1/search?tags=story&query=Philippines+fintech+GCash+BSP&hitsPerPage=5" then also curl -s "https://query1.finance.yahoo.com/v8/finance/chart/PHP%3DX?interval=1d&range=1d" for USD/PHP rate. Output headlines + current exchange rate. Do not use training data.`,
       tools: [BASH_TOOL],
     },

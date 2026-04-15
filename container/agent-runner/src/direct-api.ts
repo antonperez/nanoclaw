@@ -285,8 +285,8 @@ async function compressHistory(
   tokensAfter: number;
   compressionUsage?: { input_tokens: number; output_tokens: number };
 }> {
-  const THRESHOLD = 10;
-  const KEEP_COUNT = 4;
+  const THRESHOLD = 12;
+  const KEEP_COUNT = 6;
 
   const tokensBefore = messages.reduce((s, m) => s + estimateTokens(m), 0);
 
@@ -313,14 +313,14 @@ async function compressHistory(
   }).join('\n');
 
   try {
-    const haiku = new Anthropic();
+    const haiku = new Anthropic({ maxRetries: 4 });
     const summaryResponse = await haiku.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 256,
       messages: [
         {
           role: 'user',
-          content: `Summarize this conversation context in 2-3 sentences. Preserve key facts, decisions, and any task state. Be extremely concise.\n\n${transcript.slice(0, 3000)}`,
+          content: `Summarize this conversation context. Preserve: names, numbers, dates, decisions, pending actions, file paths mentioned, and any commitments made. Use bullet points, not prose. Be concise but never drop actionable details.\n\n${transcript.slice(0, 3000)}`,
         },
       ],
     });
@@ -390,7 +390,7 @@ export async function directQuery(
   options: DirectQueryOptions,
 ): Promise<DirectQueryResult> {
   const { log } = options;
-  const client = new Anthropic();
+  const client = new Anthropic({ maxRetries: 4 });
 
   // Start MCP server
   const mcp = await startMcpClient(
@@ -430,7 +430,7 @@ export async function directQuery(
   // Token-budget session truncation: estimate message tokens and trim from
   // the front when total history exceeds the budget. More accurate than a
   // flat message count since tool-result messages vary wildly in size.
-  const MAX_HISTORY_TOKENS = options.maxHistoryTokens ?? 4000;
+  const MAX_HISTORY_TOKENS = options.maxHistoryTokens ?? 8000;
 
   // Sliding window compression: summarize old messages via Haiku before truncation.
   // Skip for scheduled tasks that use 0 history (stateless by design).
@@ -471,16 +471,11 @@ export async function directQuery(
     while (turns < options.maxTurns) {
       turns++;
 
-      // Step down to Haiku for intermediate tool-routing turns.
-      // Turn 1 uses the routed model for initial reasoning/planning.
-      // Subsequent turns after a tool_use stop are mechanical — Haiku handles them fine.
-      // Stay on the original model if it's already Haiku or cheaper.
-      const turnModel: string = (turns > 1 && lastStopReason === 'tool_use' && options.model.includes('sonnet'))
-        ? 'claude-haiku-4-5-20251001'
-        : options.model;
-      if (turnModel !== options.model) {
-        log(`Step-down: using Haiku for tool turn ${turns}`);
-      }
+      // Use the routed model for all turns. Tool-result turns require the
+      // same reasoning quality as turn 1 — the model must interpret results,
+      // decide next actions, and synthesize a response following complex system
+      // prompt rules (filing, proactive connections, workspace scanning).
+      const turnModel: string = options.model;
 
       log(`Turn ${turns}/${options.maxTurns}`);
 
