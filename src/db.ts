@@ -82,6 +82,30 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS memory_hot (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      sender TEXT,
+      content TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_hot_group_ts ON memory_hot(group_folder, timestamp);
+
+    CREATE TABLE IF NOT EXISTS memory_warm (
+      date TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (date, group_folder)
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_state (
+      group_folder TEXT PRIMARY KEY,
+      summary TEXT NOT NULL,
+      last_rewritten_at TEXT NOT NULL
+    );
   `);
 
   // context_mode column exists for schema compat but is always 'isolated'.
@@ -786,6 +810,104 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Memory accessors ---
+
+export interface MemoryHotEvent {
+  id: number;
+  group_folder: string;
+  event_type: 'user' | 'assistant' | 'task';
+  sender: string | null;
+  content: string;
+  timestamp: string;
+}
+
+export interface MemoryWarmEntry {
+  date: string;
+  group_folder: string;
+  summary: string;
+  created_at: string;
+}
+
+export function addMemoryHot(
+  groupFolder: string,
+  eventType: 'user' | 'assistant' | 'task',
+  content: string,
+  sender?: string,
+): void {
+  db.prepare(
+    `INSERT INTO memory_hot (group_folder, event_type, sender, content, timestamp) VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    groupFolder,
+    eventType,
+    sender ?? null,
+    content,
+    new Date().toISOString(),
+  );
+}
+
+export function getMemoryHot(
+  groupFolder: string,
+  hours: number,
+): MemoryHotEvent[] {
+  const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+  return db
+    .prepare(
+      `SELECT * FROM memory_hot WHERE group_folder = ? AND timestamp >= ? ORDER BY timestamp`,
+    )
+    .all(groupFolder, since) as MemoryHotEvent[];
+}
+
+export function purgeMemoryHot(): void {
+  const cutoff = new Date(Date.now() - 24 * 3_600_000).toISOString();
+  db.prepare(`DELETE FROM memory_hot WHERE timestamp < ?`).run(cutoff);
+}
+
+export function upsertMemoryWarm(
+  date: string,
+  groupFolder: string,
+  summary: string,
+): void {
+  db.prepare(
+    `INSERT INTO memory_warm (date, group_folder, summary, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(date, group_folder) DO UPDATE SET summary = excluded.summary, created_at = excluded.created_at`,
+  ).run(date, groupFolder, summary, new Date().toISOString());
+}
+
+export function getMemoryWarm(
+  groupFolder: string,
+  days: number,
+): MemoryWarmEntry[] {
+  const cutoff = new Date(Date.now() - days * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  return db
+    .prepare(
+      `SELECT * FROM memory_warm WHERE group_folder = ? AND date >= ? ORDER BY date DESC`,
+    )
+    .all(groupFolder, cutoff) as MemoryWarmEntry[];
+}
+
+export function purgeMemoryWarm(): void {
+  const cutoff = new Date(Date.now() - 7 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  db.prepare(`DELETE FROM memory_warm WHERE date < ?`).run(cutoff);
+}
+
+export function getMemoryState(groupFolder: string): string | undefined {
+  const row = db
+    .prepare(`SELECT summary FROM memory_state WHERE group_folder = ?`)
+    .get(groupFolder) as { summary: string } | undefined;
+  return row?.summary;
+}
+
+export function setMemoryState(groupFolder: string, summary: string): void {
+  db.prepare(
+    `INSERT INTO memory_state (group_folder, summary, last_rewritten_at) VALUES (?, ?, ?)
+     ON CONFLICT(group_folder) DO UPDATE SET summary = excluded.summary, last_rewritten_at = excluded.last_rewritten_at`,
+  ).run(groupFolder, summary, new Date().toISOString());
 }
 
 // --- JSON migration ---

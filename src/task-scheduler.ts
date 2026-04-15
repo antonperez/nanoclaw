@@ -9,13 +9,20 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  createTask,
   getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
+  purgeMemoryWarm,
+  setMemoryState,
   updateTask,
   updateTaskAfterRun,
+  upsertMemoryWarm,
 } from './db.js';
+import {
+  buildDailySummaryPrompt,
+} from './memory-manager.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -150,6 +157,12 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
+  // For memory summary tasks, build the prompt dynamically from memory_hot
+  const isMemorySummaryTask = task.prompt === '__MEMORY_SUMMARY__';
+  const effectivePrompt = isMemorySummaryTask
+    ? buildDailySummaryPrompt(task.group_folder)
+    : task.prompt;
+
   // Scheduled tasks always run in isolated sessions — never resume the group
   // session. Resuming the group session causes the full conversation history to
   // be resent on every tool call turn, compounding token cost dramatically.
@@ -173,7 +186,7 @@ async function runTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: task.prompt,
+        prompt: effectivePrompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
@@ -221,6 +234,25 @@ async function runTask(
   }
 
   const durationMs = Date.now() - startTime;
+
+  // Parse memory summary output and persist to memory_warm + memory_state
+  if (isMemorySummaryTask && result) {
+    const todayMatch = result.match(/TODAY:\s*([\s\S]*?)(?=\nSTATE:|$)/i);
+    const stateMatch = result.match(/STATE:\s*([\s\S]*?)$/i);
+    if (todayMatch) {
+      const today = new Date().toISOString().slice(0, 10);
+      upsertMemoryWarm(today, task.group_folder, todayMatch[1].trim());
+      purgeMemoryWarm();
+    }
+    if (stateMatch) {
+      // Cap at 2000 chars to guard against runaway state growth
+      setMemoryState(task.group_folder, stateMatch[1].trim().slice(0, 2000));
+    }
+    logger.info(
+      { groupFolder: task.group_folder },
+      'Daily memory summary stored',
+    );
+  }
 
   logTaskRun({
     task_id: task.id,
@@ -276,6 +308,37 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   };
 
   loop();
+}
+
+/**
+ * Register a daily memory summary cron task for the given group if one does
+ * not already exist. Safe to call on every startup — idempotent.
+ */
+export function ensureMemorySummaryTask(
+  groupFolder: string,
+  chatJid: string,
+): void {
+  const taskId = `mem-summary-${groupFolder}`;
+  if (getTaskById(taskId)) return;
+
+  const interval = CronExpressionParser.parse('0 3 * * *', { tz: TIMEZONE });
+  const nextRun = interval.next().toISOString();
+
+  createTask({
+    id: taskId,
+    group_folder: groupFolder,
+    chat_jid: chatJid,
+    prompt: '__MEMORY_SUMMARY__',
+    script: null,
+    schedule_type: 'cron',
+    schedule_value: '0 3 * * *',
+    context_mode: 'isolated',
+    next_run: nextRun,
+    status: 'active',
+    created_at: new Date().toISOString(),
+  });
+
+  logger.info({ groupFolder, nextRun }, 'Registered daily memory summary task');
 }
 
 /** @internal - for tests only. */

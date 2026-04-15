@@ -68,9 +68,10 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { routeMessage } from './model-router.js';
+import { buildMemoryContext, recordHotEvent } from './memory-manager.js';
 import { runDeepSeekAgent } from './deepseek-runner.js';
 import { runOllamaAgent } from './ollama-runner.js';
-import { startSchedulerLoop } from './task-scheduler.js';
+import { ensureMemorySummaryTask, startSchedulerLoop } from './task-scheduler.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -241,7 +242,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(
+    missedMessages,
+    TIMEZONE,
+    buildMemoryContext(group.folder),
+  );
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -327,6 +332,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (text) {
           await channel.sendMessage(chatJid, text);
           outputSentToUser = true;
+          recordHotEvent(group.folder, 'assistant', text);
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
         resetIdleTimer();
@@ -573,7 +579,11 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const formatted = formatMessages(
+            messagesToSend,
+            TIMEZONE,
+            buildMemoryContext(group.folder),
+          );
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -634,6 +644,11 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Register daily memory summary tasks for all known groups (idempotent)
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    ensureMemorySummaryTask(group.folder, jid);
+  }
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
@@ -763,6 +778,11 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      // Record to memory_hot for context persistence across sessions
+      const msgGroup = registeredGroups[chatJid];
+      if (msgGroup && !msg.is_bot_message && !msg.is_from_me) {
+        recordHotEvent(msgGroup.folder, 'user', msg.content, msg.sender_name);
+      }
     },
     onChatMetadata: (
       chatJid: string,
