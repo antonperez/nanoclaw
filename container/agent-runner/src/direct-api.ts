@@ -53,6 +53,21 @@ type ContentBlock = Anthropic.ContentBlock;
 type ToolResultBlockParam = Anthropic.ToolResultBlockParam;
 type ToolUseBlock = Anthropic.ToolUseBlock;
 
+// --- Tool-result orphan helpers ---
+
+/** True if msg is a user message consisting entirely of tool_result blocks. */
+function isOrphanedToolResultMsg(msg: Message): boolean {
+  if (msg.role !== 'user' || !Array.isArray(msg.content) || msg.content.length === 0) return false;
+  return (msg.content as Array<{ type: string }>).every((b) => b.type === 'tool_result');
+}
+
+/** Strip any leading orphaned tool_result user messages from arr in-place. */
+function stripOrphanedHead(arr: Message[]): void {
+  while (arr.length > 1 && isOrphanedToolResultMsg(arr[0])) {
+    arr.shift();
+  }
+}
+
 // --- Cost calculation ---
 
 // Per-model pricing (per million tokens)
@@ -296,6 +311,9 @@ async function compressHistory(
 
   const toCompress = messages.slice(0, messages.length - KEEP_COUNT);
   const toKeep = messages.slice(messages.length - KEEP_COUNT);
+  // Drop any leading tool_result messages in toKeep whose matching tool_use
+  // landed in toCompress — the API rejects orphaned tool_result blocks.
+  stripOrphanedHead(toKeep);
 
   // Build a text transcript of old messages for the summarizer
   const transcript = toCompress.map((m) => {
@@ -456,6 +474,12 @@ export async function directQuery(
 
   let historyTokens = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
   while (historyTokens > MAX_HISTORY_TOKENS && messages.length > 1) {
+    historyTokens -= estimateTokens(messages[0]);
+    messages.shift();
+  }
+  // After truncation, the new head may be a tool_result whose matching tool_use
+  // was removed. Strip any such orphaned messages to keep the API happy.
+  while (messages.length > 1 && isOrphanedToolResultMsg(messages[0])) {
     historyTokens -= estimateTokens(messages[0]);
     messages.shift();
   }
