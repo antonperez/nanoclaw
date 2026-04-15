@@ -712,10 +712,10 @@ async function main(): Promise<void> {
       Number.isFinite(count) && count > 0 ? count : RESET_DEFAULT_WINDOW;
 
     const group = registeredGroups[chatJid];
-    if (group) {
-      delete sessions[group.folder];
-      deleteSession(group.folder);
-    }
+    if (!group) return;
+
+    delete sessions[group.folder];
+    deleteSession(group.folder);
 
     resetContextReload[chatJid] = reloadCount;
 

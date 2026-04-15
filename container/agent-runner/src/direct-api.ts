@@ -313,7 +313,7 @@ async function compressHistory(
   }).join('\n');
 
   try {
-    const haiku = new Anthropic();
+    const haiku = new Anthropic({ maxRetries: 4 });
     const summaryResponse = await haiku.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 256,
@@ -390,7 +390,7 @@ export async function directQuery(
   options: DirectQueryOptions,
 ): Promise<DirectQueryResult> {
   const { log } = options;
-  const client = new Anthropic();
+  const client = new Anthropic({ maxRetries: 4 });
 
   // Start MCP server
   const mcp = await startMcpClient(
