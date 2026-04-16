@@ -90,8 +90,7 @@ export function buildDailySummaryPrompt(groupFolder: string): string {
               minute: '2-digit',
             });
             const who =
-              e.sender ??
-              (e.event_type === 'assistant' ? 'NanoClaw' : 'User');
+              e.sender ?? (e.event_type === 'assistant' ? 'NanoClaw' : 'User');
             return `[${time}] (${e.event_type}) ${who}: ${e.content}`;
           })
           .join('\n')
