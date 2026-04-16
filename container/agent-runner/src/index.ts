@@ -18,7 +18,6 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { directQuery } from './direct-api.js';
-import { runDailyBrief } from './daily-brief.js';
 import { classifyQuery, buildToolFilter } from './query-classifier.js';
 
 interface ContainerInput {
@@ -234,33 +233,6 @@ async function runQuery(
   };
   const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
   log(`Model routing: ${model} (reason: ${envModel ? 'env-override' : routing.reason})`);
-
-  // Detect daily brief and use parallel pipeline instead of single query
-  const isDailyBrief = (containerInput.isScheduledTask ?? false) &&
-    /daily\s*brief|morning\s*brief|daily\s*digest/i.test(prompt);
-
-  if (isDailyBrief) {
-    log('Detected daily brief — using parallel section pipeline');
-    const briefResult = await runDailyBrief(log);
-
-    logTokenUsage(
-      sid,
-      briefResult.totalInputTokens,
-      briefResult.totalOutputTokens,
-      0,
-      0,
-      briefResult.costUsd,
-    );
-
-    writeOutput({
-      status: 'success',
-      result: briefResult.text,
-      newSessionId: sid,
-    });
-
-    log(`Daily brief done. Tokens: ${briefResult.totalInputTokens + briefResult.totalOutputTokens}`);
-    return { newSessionId: sid, closedDuringQuery: false };
-  }
 
   // Conditional tool loading — only include tools the prompt actually needs
   const toolFilter = buildToolFilter(prompt, containerInput.isMain, routing.reason);
