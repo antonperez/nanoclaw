@@ -221,8 +221,7 @@ async function runQuery(
   fs.mkdirSync(sessionDir, { recursive: true });
 
   // Smart model routing — classify query to pick cheapest adequate model
-  const hasSession = !!sessionId;
-  const routing = classifyQuery(prompt, containerInput.isScheduledTask ?? false, hasSession);
+  const routing = classifyQuery(prompt, containerInput.isScheduledTask ?? false);
 
   // Allow CLAUDE_MODEL env to override routing (e.g. force opus for testing)
   const envModel = process.env.CLAUDE_MODEL;
@@ -239,7 +238,7 @@ async function runQuery(
 
   // D: Zero history for scheduled tasks (stateless), E: lower max_tokens for simple queries
   const isScheduled = containerInput.isScheduledTask ?? false;
-  const isSimple = routing.reason === 'simple-pattern' || routing.reason === 'short-no-history';
+  const isSimple = routing.reason === 'simple-pattern';
 
   const result = await directQuery({
     prompt,

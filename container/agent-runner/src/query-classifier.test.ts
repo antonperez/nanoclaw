@@ -5,67 +5,67 @@ import { classifyQuery, buildToolFilter } from './query-classifier.js';
 
 describe('classifyQuery', () => {
   it('routes scheduled tasks to haiku', () => {
-    const result = classifyQuery('Run the daily brief', true, false);
+    const result = classifyQuery('Run the daily brief', true);
     expect(result.model).toContain('haiku');
     expect(result.reason).toBe('scheduled-task');
   });
 
-  it('routes short prompts without session to haiku', () => {
-    const result = classifyQuery('what time is it?', false, false);
-    expect(result.model).toContain('haiku');
-    expect(result.reason).toBe('short-no-history');
-  });
-
-  it('routes long prompts with session to sonnet', () => {
-    const longPrompt = 'Please analyze the quarterly report and summarize the key findings for the team meeting. '.repeat(4);
-    const result = classifyQuery(longPrompt, false, true);
-    expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
-  });
-
   it('routes simple greetings to haiku', () => {
     for (const greeting of ['hi', 'Hello', 'good morning', 'thanks', 'gm', 'ok']) {
-      const result = classifyQuery(greeting, false, true);
+      const result = classifyQuery(greeting, false);
       expect(result.model).toContain('haiku');
       expect(result.reason).toBe('simple-pattern');
     }
   });
 
-  it('routes complex prompts over 300 chars to sonnet', () => {
-    // Prompt intentionally >300 chars with no tool keywords to verify length cutoff
-    const result = classifyQuery(
-      'Analyze my spending this month and create a summary report with charts. Include breakdowns by category, trends over time, and comparisons to previous months. Also highlight any anomalies or unusual spending patterns you detect. Be thorough and very detailed in your analysis, covering all aspects of my finances.',
-      false, true,
-    );
+  it('routes greeting with trailing punctuation to haiku', () => {
+    for (const greeting of ['hi!', 'thanks.', 'ok?', 'bye!']) {
+      const result = classifyQuery(greeting, false);
+      expect(result.model).toContain('haiku');
+      expect(result.reason).toBe('simple-pattern');
+    }
+  });
+
+  it('does not route greeting followed by a request to haiku', () => {
+    const result = classifyQuery('hi can you schedule a meeting', false);
     expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('default-sonnet');
   });
 
-  it('routes short Q&A without tool keywords to haiku', () => {
-    const result = classifyQuery('what is the capital of France?', false, true);
-    expect(result.model).toContain('haiku');
-    expect(result.reason).toBe('short-no-tools');
+  it('does not route greeting with extra words to haiku', () => {
+    for (const prompt of ['hello how are you', 'ok sounds good', 'thanks for the help']) {
+      const result = classifyQuery(prompt, false);
+      expect(result.model).toContain('sonnet');
+      expect(result.reason).toBe('default-sonnet');
+    }
   });
 
-  it('routes short prompt with tool keywords to sonnet', () => {
-    const result = classifyQuery('schedule a meeting for tomorrow at 3pm', false, true);
+  it('routes complex prompts to sonnet', () => {
+    const longPrompt = 'Please analyze the quarterly report and summarize the key findings for the team meeting. '.repeat(4);
+    const result = classifyQuery(longPrompt, false);
     expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('default-sonnet');
   });
 
-  it('routes long Q&A to sonnet regardless', () => {
-    const longPrompt = 'I need you to analyze this situation and provide recommendations. '.repeat(6);
-    const result = classifyQuery(longPrompt, false, true);
+  it('routes prompt with tool keywords to sonnet', () => {
+    const result = classifyQuery('schedule a meeting for tomorrow at 3pm', false);
     expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('default-sonnet');
+  });
+
+  it('routes general questions to sonnet', () => {
+    const result = classifyQuery('what is the capital of France?', false);
+    expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('default-sonnet');
   });
 
   it('scheduled task overrides all other checks', () => {
-    // Even a long complex prompt goes to haiku if scheduled
     const result = classifyQuery(
       'Analyze my spending this month and create a summary report with charts',
-      true, true,
+      true,
     );
     expect(result.model).toContain('haiku');
+    expect(result.reason).toBe('scheduled-task');
   });
 });
 
