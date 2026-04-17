@@ -31,24 +31,13 @@ const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
 export function classifyQuery(
   prompt: string,
   isScheduledTask: boolean,
-  hasSession: boolean,
 ): { model: string; reason: string } {
   if (isScheduledTask) {
     return { model: HAIKU, reason: 'scheduled-task' };
   }
-  if (!hasSession && prompt.length < 100) {
-    return { model: HAIKU, reason: 'short-no-history' };
-  }
-  const simplePatterns = /^(hi|hello|hey|good morning|good evening|what time|what day|what date|thank|thanks|ok|okay|gm|gn)\b/i;
+  const simplePatterns = /^(hi|hello|hey|good morning|good afternoon|good evening|good night|what time|what day|what date|thank|thanks|thank you|ty|ok|okay|sure|yes|no|yep|nope|yea|yeah|nah|cool|nice|great|got it|gm|gn|lol|haha|bye|later|cheers|np|k)\s*[.!?]*$/i;
   if (simplePatterns.test(prompt.trim())) {
     return { model: HAIKU, reason: 'simple-pattern' };
-  }
-  // Single-turn factual lookups with no prior session — no reasoning needed
-  if (!hasSession) {
-    const factualPatterns = /^(what is|what's|who is|who's|when is|when was|where is|where was|how many|how much|define|convert|translate)\b/i;
-    if (factualPatterns.test(prompt.trim())) {
-      return { model: HAIKU, reason: 'factual-lookup' };
-    }
   }
   return { model: SONNET, reason: 'default-sonnet' };
 }
