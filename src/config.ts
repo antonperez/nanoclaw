@@ -13,6 +13,9 @@ const envConfig = readEnvFile([
   'DEEPSEEK_API_KEY',
   'DEEPSEEK_BASE_URL',
   'DEEPSEEK_MODEL',
+  'GEMINI_API_KEY',
+  'GEMINI_BASE_URL',
+  'GEMINI_MODEL',
   'OLLAMA_HOST',
   'OLLAMA_MODEL',
   'RESET_DEFAULT_WINDOW',
@@ -119,6 +122,17 @@ export const DEEPSEEK_API_KEY =
   process.env.DEEPSEEK_API_KEY || envConfig.DEEPSEEK_API_KEY || '';
 export const DEEPSEEK_MODEL =
   process.env.DEEPSEEK_MODEL || envConfig.DEEPSEEK_MODEL || 'deepseek-chat';
+
+// Gemini — OpenAI-compatible default backend
+export const GEMINI_BASE_URL =
+  process.env.GEMINI_BASE_URL ||
+  envConfig.GEMINI_BASE_URL ||
+  'https://generativelanguage.googleapis.com/v1beta/openai';
+export const GEMINI_API_KEY =
+  process.env.GEMINI_API_KEY || envConfig.GEMINI_API_KEY || '';
+export const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || envConfig.GEMINI_MODEL || 'gemini-2.5-flash';
+export const GEMINI_CONFIGURED = !!GEMINI_API_KEY;
 
 // Ollama — local model backend (explicit opt-in via "vault" or "ollama" keywords)
 export const OLLAMA_HOST =

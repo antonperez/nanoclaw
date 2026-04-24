@@ -70,6 +70,7 @@ import {
 import { routeMessage } from './model-router.js';
 import { buildMemoryContext, recordHotEvent } from './memory-manager.js';
 import { runDeepSeekAgent } from './deepseek-runner.js';
+import { runGeminiAgent } from './gemini-runner.js';
 import { runOllamaAgent } from './ollama-runner.js';
 import {
   ensureMemorySummaryTask,
@@ -305,6 +306,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       async (text) => {
         await channel.sendMessage(chatJid, `[DEEPSEEK]: ${text}`);
         outputSentToUser = true;
+      },
+    );
+    if (result === 'error') hadError = true;
+  } else if (routingDecision.model === 'gemini') {
+    // Gemini path — default backend, OpenAI-compatible Google API with read/write memory tools
+    const result = await runGeminiAgent(
+      missedMessages,
+      ASSISTANT_NAME,
+      resolveGroupFolderPath(group.folder),
+      async (text) => {
+        await channel.sendMessage(chatJid, text);
+        outputSentToUser = true;
+        recordHotEvent(group.folder, 'assistant', text);
       },
     );
     if (result === 'error') hadError = true;
@@ -643,6 +657,7 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  process.stderr.write(`[MAIN] started pid=${process.pid} LOG_FILE=${process.env.LOG_FILE}\n`);
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -883,12 +898,17 @@ async function main(): Promise<void> {
   });
 }
 
-// Guard: only run when executed directly, not when imported by tests
+// Guard: only run when executed directly, not when imported by tests.
+// pm2 sets argv[1] to its own ProcessContainerFork.js, not our script,
+// so we fall back to pm_exec_path for pm2 detection.
 // decodeURIComponent normalizes encoding differences (e.g. ~ vs %7E in iCloud paths)
-const isDirectRun =
-  process.argv[1] &&
-  decodeURIComponent(new URL(import.meta.url).pathname) ===
-    decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
+const scriptPath = decodeURIComponent(new URL(import.meta.url).pathname);
+const argv1Path =
+  process.argv[1] && decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
+const pm2ExecPath =
+  process.env.pm_exec_path &&
+  decodeURIComponent(new URL(`file://${process.env.pm_exec_path}`).pathname);
+const isDirectRun = scriptPath === argv1Path || scriptPath === pm2ExecPath;
 
 if (isDirectRun) {
   main().catch((err) => {

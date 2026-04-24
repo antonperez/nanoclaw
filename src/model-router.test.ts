@@ -20,7 +20,7 @@ describe('routeMessage — DeepSeek triggers', () => {
   });
 
   it('does not route mid-sentence "deepseek" to deepseek', () => {
-    expect(routeMessage('compare claude and deepseek').model).not.toBe(
+    expect(routeMessage('compare gemini and deepseek').model).not.toBe(
       'deepseek',
     );
   });
@@ -57,12 +57,20 @@ describe('routeMessage — Ollama triggers', () => {
 });
 
 describe('routeMessage — Claude triggers', () => {
-  it('routes "claude" keyword to claude', () => {
-    expect(routeMessage('claude, write me a script').model).toBe('claude');
-  });
-
   it('routes "andy" keyword to claude', () => {
     expect(routeMessage('andy help me debug this').model).toBe('claude');
+  });
+
+  it('routes "Andy" (case-insensitive) to claude', () => {
+    expect(routeMessage('Andy write a function').model).toBe('claude');
+  });
+
+  it('routes "ANDY" (case-insensitive) to claude', () => {
+    expect(routeMessage('ANDY fix this bug').model).toBe('claude');
+  });
+
+  it('routes "claude" keyword to claude', () => {
+    expect(routeMessage('claude, write me a script').model).toBe('claude');
   });
 
   it('routes "Claude" (case-insensitive) to claude', () => {
@@ -74,13 +82,27 @@ describe('routeMessage — Claude triggers', () => {
   });
 });
 
-describe('routeMessage — default routing', () => {
-  it('defaults to claude for plain messages', () => {
-    expect(routeMessage('what is the weather today?').model).toBe('claude');
+describe('routeMessage — Gemini triggers', () => {
+  it('routes "gem" prefix to gemini', () => {
+    expect(routeMessage('gem summarize this').model).toBe('gemini');
   });
 
-  it('defaults to claude for empty string', () => {
-    expect(routeMessage('').model).toBe('claude');
+  it('routes "gemini" prefix to gemini', () => {
+    expect(routeMessage('gemini explain this').model).toBe('gemini');
+  });
+
+  it('returns force-gemini reason', () => {
+    expect(routeMessage('gem hello').reason).toBe('force-gemini keyword');
+  });
+});
+
+describe('routeMessage — default routing', () => {
+  it('defaults to gemini for plain messages', () => {
+    expect(routeMessage('what is the weather today?').model).toBe('gemini');
+  });
+
+  it('defaults to gemini for empty string', () => {
+    expect(routeMessage('').model).toBe('gemini');
   });
 
   it('returns default reason', () => {
@@ -89,8 +111,7 @@ describe('routeMessage — default routing', () => {
 });
 
 describe('routeMessage — priority order', () => {
-  it('deepseek prefix beats claude keyword', () => {
-    // "ds andy" — deepseek prefix takes priority over "andy"
+  it('deepseek prefix beats andy keyword', () => {
     expect(routeMessage('ds andy, write code').model).toBe('deepseek');
   });
 
@@ -98,8 +119,16 @@ describe('routeMessage — priority order', () => {
     expect(routeMessage('ds vault compare models').model).toBe('deepseek');
   });
 
-  it('claude keyword beats ollama keyword', () => {
-    // "claude vault" — claude check runs before ollama check
+  it('andy beats ollama keyword', () => {
+    expect(routeMessage('andy using ollama locally').model).toBe('claude');
+  });
+
+  it('claude beats ollama keyword', () => {
     expect(routeMessage('claude using ollama locally').model).toBe('claude');
+  });
+
+  it('andy beats gemini prefix', () => {
+    // andy is checked before gemini in priority order
+    expect(routeMessage('gem andy do something').model).toBe('claude');
   });
 });

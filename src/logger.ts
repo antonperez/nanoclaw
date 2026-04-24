@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 const LEVELS = { debug: 20, info: 30, warn: 40, error: 50, fatal: 60 } as const;
 type Level = keyof typeof LEVELS;
 
@@ -15,6 +17,10 @@ const FULL_RESET = '\x1b[0m';
 
 const threshold =
   LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
+
+// When running under pm2 (non-TTY), Node.js buffers stdout/stderr.
+// Write directly to a file so logs are always visible in real time.
+const LOG_FILE = process.env.LOG_FILE || null;
 
 function formatErr(err: unknown): string {
   if (err instanceof Error) {
@@ -48,14 +54,16 @@ function log(
   if (LEVELS[level] < threshold) return;
   const tag = `${COLORS[level]}${level.toUpperCase()}${level === 'fatal' ? FULL_RESET : RESET}`;
   const stream = LEVELS[level] >= LEVELS.warn ? process.stderr : process.stdout;
-  if (typeof dataOrMsg === 'string') {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`,
-    );
+  const line =
+    typeof dataOrMsg === 'string'
+      ? `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`
+      : `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`;
+
+  if (LOG_FILE) {
+    const plain = line.replace(/\x1b\[[0-9;]*m/g, '');
+    fs.appendFileSync(LOG_FILE, plain);
   } else {
-    stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`,
-    );
+    stream.write(line);
   }
 }
 
