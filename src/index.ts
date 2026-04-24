@@ -51,6 +51,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -319,6 +320,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
         recordHotEvent(group.folder, 'assistant', text);
+        // Persist Gemini reply so it appears in future message history
+        storeMessageDirect({
+          id: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: chatJid,
+          sender: ASSISTANT_NAME,
+          sender_name: ASSISTANT_NAME,
+          content: text,
+          timestamp: new Date().toISOString(),
+          is_from_me: true,
+          is_bot_message: true,
+        });
       },
     );
     if (result === 'error') hadError = true;
@@ -657,7 +669,9 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
-  process.stderr.write(`[MAIN] started pid=${process.pid} LOG_FILE=${process.env.LOG_FILE}\n`);
+  process.stderr.write(
+    `[MAIN] started pid=${process.pid} LOG_FILE=${process.env.LOG_FILE}\n`,
+  );
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -904,7 +918,8 @@ async function main(): Promise<void> {
 // decodeURIComponent normalizes encoding differences (e.g. ~ vs %7E in iCloud paths)
 const scriptPath = decodeURIComponent(new URL(import.meta.url).pathname);
 const argv1Path =
-  process.argv[1] && decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
+  process.argv[1] &&
+  decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
 const pm2ExecPath =
   process.env.pm_exec_path &&
   decodeURIComponent(new URL(`file://${process.env.pm_exec_path}`).pathname);
