@@ -51,6 +51,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -70,6 +71,7 @@ import {
 import { routeMessage } from './model-router.js';
 import { buildMemoryContext, recordHotEvent } from './memory-manager.js';
 import { runDeepSeekAgent } from './deepseek-runner.js';
+import { runGeminiAgent } from './gemini-runner.js';
 import { runOllamaAgent } from './ollama-runner.js';
 import {
   ensureMemorySummaryTask,
@@ -222,10 +224,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+  const reloadCount = resetContextReload[chatJid];
   let missedMessages;
-  if (resetContextReload[chatJid]) {
-    const reloadCount = resetContextReload[chatJid];
-    delete resetContextReload[chatJid];
+  if (reloadCount) {
     missedMessages = getRecentMessages(chatJid, ASSISTANT_NAME, reloadCount);
   } else {
     missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
@@ -308,6 +309,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       },
     );
     if (result === 'error') hadError = true;
+  } else if (routingDecision.model === 'gemini') {
+    // Gemini path — default backend, OpenAI-compatible Google API with read/write memory tools
+    const result = await runGeminiAgent(
+      missedMessages,
+      ASSISTANT_NAME,
+      resolveGroupFolderPath(group.folder),
+      async (text) => {
+        await channel.sendMessage(chatJid, text);
+        outputSentToUser = true;
+        recordHotEvent(group.folder, 'assistant', text);
+        // Two separate writes serve different purposes: storeMessageDirect persists
+        // the reply for cursor recovery (getLastBotMessageTimestamp); recordHotEvent
+        // feeds it back as conversation context on the next turn. Both are needed.
+        storeMessageDirect({
+          id: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: chatJid,
+          sender: ASSISTANT_NAME,
+          sender_name: ASSISTANT_NAME,
+          content: text,
+          timestamp: new Date().toISOString(),
+          is_from_me: true,
+          is_bot_message: true,
+        });
+      },
+    );
+    if (result === 'error') {
+      hadError = true;
+      if (!outputSentToUser) {
+        // Notify the user so the failure is visible; cursor will roll back for retry.
+        channel.sendMessage(chatJid, 'Something went wrong, please try again.').catch(() => {});
+      }
+    }
   } else if (routingDecision.model === 'ollama') {
     // Fast local path — direct Ollama call, no container overhead
     const result = await runOllamaAgent(
@@ -363,9 +396,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      delete resetContextReload[chatJid];
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // Roll back cursor so retries can re-process these messages.
+    // Keep resetContextReload so the retry uses the same reload window.
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(
@@ -375,6 +410,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  delete resetContextReload[chatJid];
   return true;
 }
 
@@ -643,6 +679,9 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  process.stderr.write(
+    `[MAIN] started pid=${process.pid} LOG_FILE=${process.env.LOG_FILE}\n`,
+  );
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -883,12 +922,18 @@ async function main(): Promise<void> {
   });
 }
 
-// Guard: only run when executed directly, not when imported by tests
+// Guard: only run when executed directly, not when imported by tests.
+// pm2 sets argv[1] to its own ProcessContainerFork.js, not our script,
+// so we fall back to pm_exec_path for pm2 detection.
 // decodeURIComponent normalizes encoding differences (e.g. ~ vs %7E in iCloud paths)
-const isDirectRun =
+const scriptPath = decodeURIComponent(new URL(import.meta.url).pathname);
+const argv1Path =
   process.argv[1] &&
-  decodeURIComponent(new URL(import.meta.url).pathname) ===
-    decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
+  decodeURIComponent(new URL(`file://${process.argv[1]}`).pathname);
+const pm2ExecPath =
+  process.env.pm_exec_path &&
+  decodeURIComponent(new URL(`file://${process.env.pm_exec_path}`).pathname);
+const isDirectRun = scriptPath === argv1Path || scriptPath === pm2ExecPath;
 
 if (isDirectRun) {
   main().catch((err) => {

@@ -4,7 +4,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 import nodemailer from 'nodemailer';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { sendPoolMessage } from './channels/telegram.js';
 import { readEnvFile } from './env.js';
 import { AvailableGroup } from './container-runner.js';
@@ -66,7 +66,7 @@ function resolveAttachments(
   containerPaths: string[],
   groupFolder: string,
 ): { filename: string; path: string; contentType: string }[] {
-  const groupDir = path.join(DATA_DIR, '..', 'groups', groupFolder);
+  const groupDir = path.join(GROUPS_DIR, groupFolder);
   return containerPaths
     .map((p) => {
       // Map /workspace/group/... → groups/{groupFolder}/...
@@ -92,6 +92,42 @@ function createEmailTransporter() {
     secure: false,
     auth: { user, pass },
   });
+}
+
+async function processIpcDir(
+  baseDir: string,
+  dir: string,
+  label: string,
+  sourceGroup: string,
+  handler: (data: Record<string, unknown>) => Promise<void>,
+): Promise<void> {
+  if (!fs.existsSync(dir)) return;
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+  } catch (err) {
+    logger.error({ err, sourceGroup }, `Error reading IPC ${label} directory`);
+    return;
+  }
+  for (const file of files) {
+    const filePath = path.join(dir, file);
+    try {
+      const data = JSON.parse(
+        fs.readFileSync(filePath, 'utf-8'),
+      ) as Record<string, unknown>;
+      await handler(data);
+      fs.unlinkSync(filePath);
+    } catch (err) {
+      logger.error({ file, sourceGroup, err }, `Error processing IPC ${label}`);
+      const errorDir = path.join(baseDir, 'errors');
+      fs.mkdirSync(errorDir, { recursive: true });
+      try {
+        fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+      } catch {
+        // file may have already been removed
+      }
+    }
+  }
 }
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -132,170 +168,103 @@ export function startIpcWatcher(deps: IpcDeps): void {
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
       const emailsDir = path.join(ipcBaseDir, sourceGroup, 'emails');
 
-      // Process messages from this group's IPC directory
-      try {
-        if (fs.existsSync(messagesDir)) {
-          const messageFiles = fs
-            .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
-          for (const file of messageFiles) {
-            const filePath = path.join(messagesDir, file);
-            try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  if (data.sender && data.chatJid.startsWith('tg:')) {
-                    await sendPoolMessage(
-                      data.chatJid,
-                      data.text,
-                      data.sender,
-                      sourceGroup,
-                    );
-                  } else {
-                    await deps.sendMessage(data.chatJid, data.text);
-                  }
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
-                  );
-                }
-              }
-              fs.unlinkSync(filePath);
-            } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
-                'Error processing IPC message',
-              );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
-            }
-          }
-        }
-      } catch (err) {
-        logger.error(
-          { err, sourceGroup },
-          'Error reading IPC messages directory',
-        );
-      }
-
-      // Process tasks from this group's IPC directory
-      try {
-        if (fs.existsSync(tasksDir)) {
-          const taskFiles = fs
-            .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
-          for (const file of taskFiles) {
-            const filePath = path.join(tasksDir, file);
-            try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
-              fs.unlinkSync(filePath);
-            } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
-                'Error processing IPC task',
-              );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
-            }
-          }
-        }
-      } catch (err) {
-        logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
-      }
-
-      // Process outbound emails from this group's IPC directory
-      try {
-        if (fs.existsSync(emailsDir)) {
-          const emailFiles = fs
-            .readdirSync(emailsDir)
-            .filter((f) => f.endsWith('.json'));
-          for (const file of emailFiles) {
-            const filePath = path.join(emailsDir, file);
-            try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      await processIpcDir(
+        ipcBaseDir,
+        messagesDir,
+        'message',
+        sourceGroup,
+        async (data) => {
+          if (data.type === 'message' && data.chatJid && data.text) {
+            const targetGroup = registeredGroups[data.chatJid as string];
+            if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
               if (
-                data.type === 'send_email' &&
-                data.to &&
-                data.subject &&
-                data.body
+                data.sender &&
+                (data.chatJid as string).startsWith('tg:')
               ) {
-                const transporter = createEmailTransporter();
-                if (!transporter) {
-                  logger.warn(
-                    { sourceGroup },
-                    'Email IPC received but ICLOUD_EMAIL/ICLOUD_APP_PASSWORD not configured',
-                  );
-                } else {
-                  const env = readEnvFile(['ICLOUD_EMAIL']);
-                  const from = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
-                  const resolved =
-                    Array.isArray(data.attachments) && data.attachments.length
-                      ? resolveAttachments(data.attachments, sourceGroup)
-                      : [];
-                  const attachments = resolved.length ? resolved : undefined;
-                  await transporter.sendMail({
-                    from,
-                    to: data.to,
-                    cc: data.cc,
-                    bcc: data.bcc,
-                    subject: data.subject,
-                    text: data.body,
-                    attachments,
-                  });
-                  logger.info(
-                    {
-                      to: data.to,
-                      cc: data.cc,
-                      bcc: data.bcc,
-                      subject: data.subject,
-                      attachments: attachments?.map((a) => a.filename),
-                      sourceGroup,
-                    },
-                    'Email sent via iCloud SMTP',
-                  );
-                }
+                await sendPoolMessage(
+                  data.chatJid as string,
+                  data.text as string,
+                  data.sender as string,
+                  sourceGroup,
+                );
+              } else {
+                await deps.sendMessage(
+                  data.chatJid as string,
+                  data.text as string,
+                );
               }
-              fs.unlinkSync(filePath);
-            } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
-                'Error processing IPC email',
-              );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
+              logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+            } else {
+              logger.warn(
+                { chatJid: data.chatJid, sourceGroup },
+                'Unauthorized IPC message attempt blocked',
               );
             }
           }
-        }
-      } catch (err) {
-        logger.error(
-          { err, sourceGroup },
-          'Error reading IPC emails directory',
-        );
-      }
+        },
+      );
+
+      await processIpcDir(
+        ipcBaseDir,
+        tasksDir,
+        'task',
+        sourceGroup,
+        async (data) => {
+          await processTaskIpc(
+            data as Parameters<typeof processTaskIpc>[0],
+            sourceGroup,
+            isMain,
+            deps,
+          );
+        },
+      );
+
+      await processIpcDir(
+        ipcBaseDir,
+        emailsDir,
+        'email',
+        sourceGroup,
+        async (data) => {
+          if (data.type === 'send_email' && data.to && data.subject && data.body) {
+            const transporter = createEmailTransporter();
+            if (!transporter) {
+              logger.warn(
+                { sourceGroup },
+                'Email IPC received but ICLOUD_EMAIL/ICLOUD_APP_PASSWORD not configured',
+              );
+            } else {
+              const env = readEnvFile(['ICLOUD_EMAIL']);
+              const from = process.env.ICLOUD_EMAIL || env.ICLOUD_EMAIL;
+              const resolved =
+                Array.isArray(data.attachments) &&
+                (data.attachments as string[]).length
+                  ? resolveAttachments(data.attachments as string[], sourceGroup)
+                  : [];
+              const attachments = resolved.length ? resolved : undefined;
+              await transporter.sendMail({
+                from,
+                to: data.to as string,
+                cc: data.cc as string | undefined,
+                bcc: data.bcc as string | undefined,
+                subject: data.subject as string,
+                text: data.body as string,
+                attachments,
+              });
+              logger.info(
+                {
+                  to: data.to,
+                  cc: data.cc,
+                  bcc: data.bcc,
+                  subject: data.subject,
+                  attachments: attachments?.map((a) => a.filename),
+                  sourceGroup,
+                },
+                'Email sent via iCloud SMTP',
+              );
+            }
+          }
+        },
+      );
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);

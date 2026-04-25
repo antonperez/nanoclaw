@@ -36,6 +36,7 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_bot_messages ON messages(chat_jid, is_bot_message, timestamp);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -131,7 +132,7 @@ function createSchema(database: Database.Database): void {
   // Track when a session was created so the host can rotate stale sessions.
   try {
     database.exec(
-      `ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '${new Date().toISOString()}'`,
+      `ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     );
   } catch {
     /* column already exists */

@@ -185,6 +185,16 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
+      // Skip copy when the destination SKILL.md is already up to date
+      const srcSkill = path.join(srcDir, 'SKILL.md');
+      const dstSkill = path.join(dstDir, 'SKILL.md');
+      if (
+        fs.existsSync(dstSkill) &&
+        fs.existsSync(srcSkill) &&
+        fs.statSync(dstSkill).mtimeMs >= fs.statSync(srcSkill).mtimeMs
+      ) {
+        continue;
+      }
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
