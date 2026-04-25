@@ -67,7 +67,16 @@ export function logGeminiUsage(
     (uncachedInput * GEMINI_FLASH_INPUT_USD_PER_M) / 1_000_000 +
     (cached * GEMINI_FLASH_CACHED_INPUT_USD_PER_M) / 1_000_000 +
     (output * GEMINI_FLASH_OUTPUT_USD_PER_M) / 1_000_000;
-  logUsage(groupFolder, GEMINI_MODEL, uncachedInput, cached, output, total, cost, logDir);
+  logUsage(
+    groupFolder,
+    GEMINI_MODEL,
+    uncachedInput,
+    cached,
+    output,
+    total,
+    cost,
+    logDir,
+  );
 }
 
 interface FileIndexCache {

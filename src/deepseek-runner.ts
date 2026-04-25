@@ -11,7 +11,7 @@ import { logUsage } from './token-logger.js';
 // DeepSeek-V3 (deepseek-chat) pricing USD per 1M tokens. Update if pricing changes.
 const DS_INPUT_USD_PER_M = 0.27;
 const DS_CACHED_USD_PER_M = 0.07;
-const DS_OUTPUT_USD_PER_M = 1.10;
+const DS_OUTPUT_USD_PER_M = 1.1;
 
 interface AnthropicMessage {
   role: 'user' | 'assistant';
@@ -118,7 +118,15 @@ export async function runDeepSeekAgent(
       (input * DS_INPUT_USD_PER_M) / 1_000_000 +
       (cached * DS_CACHED_USD_PER_M) / 1_000_000 +
       (output * DS_OUTPUT_USD_PER_M) / 1_000_000;
-    logUsage(path.basename(groupDir), DEEPSEEK_MODEL, input, cached, output, total, cost);
+    logUsage(
+      path.basename(groupDir),
+      DEEPSEEK_MODEL,
+      input,
+      cached,
+      output,
+      total,
+      cost,
+    );
   }
 
   return 'success';

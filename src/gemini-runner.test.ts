@@ -95,11 +95,15 @@ describe('logGeminiUsage', () => {
   });
 
   it('writes header + one row on first call', () => {
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 1000,
-      completion_tokens: 100,
-      total_tokens: 1100,
-    }, tmpDir);
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 1000,
+        completion_tokens: 100,
+        total_tokens: 1100,
+      },
+      tmpDir,
+    );
     const lines = readLog();
     expect(lines).toHaveLength(2);
     expect(lines[0]).toBe(
@@ -108,25 +112,37 @@ describe('logGeminiUsage', () => {
   });
 
   it('appends without re-writing the header on subsequent calls', () => {
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 1000,
-      completion_tokens: 100,
-      total_tokens: 1100,
-    }, tmpDir);
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 2000,
-      completion_tokens: 200,
-      total_tokens: 2200,
-    }, tmpDir);
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 1000,
+        completion_tokens: 100,
+        total_tokens: 1100,
+      },
+      tmpDir,
+    );
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 2000,
+        completion_tokens: 200,
+        total_tokens: 2200,
+      },
+      tmpDir,
+    );
     expect(readLog()).toHaveLength(3); // header + 2 rows
   });
 
   it('computes cost without cache: 1M input + 1M output ≈ $2.80 ($0.30 + $2.50)', () => {
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 1_000_000,
-      completion_tokens: 1_000_000,
-      total_tokens: 2_000_000,
-    }, tmpDir);
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 1_000_000,
+        completion_tokens: 1_000_000,
+        total_tokens: 2_000_000,
+      },
+      tmpDir,
+    );
     const row = readLog()[1].split(',');
     const cost = parseFloat(row[7]);
     expect(cost).toBeCloseTo(2.8, 5);
@@ -136,12 +152,16 @@ describe('logGeminiUsage', () => {
     // 100K total input, 80K cached, 20K uncached. 1K output.
     // Cost = 20K * $0.30/M + 80K * $0.075/M + 1K * $2.50/M
     //      = 0.006 + 0.006 + 0.0025 = 0.0145
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 100_000,
-      completion_tokens: 1_000,
-      total_tokens: 101_000,
-      prompt_tokens_details: { cached_tokens: 80_000 },
-    }, tmpDir);
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 100_000,
+        completion_tokens: 1_000,
+        total_tokens: 101_000,
+        prompt_tokens_details: { cached_tokens: 80_000 },
+      },
+      tmpDir,
+    );
     const row = readLog()[1].split(',');
     const uncached = parseInt(row[3], 10);
     const cached = parseInt(row[4], 10);
@@ -152,20 +172,28 @@ describe('logGeminiUsage', () => {
   });
 
   it('falls back to prompt+completion when total_tokens is missing', () => {
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 500,
-      completion_tokens: 50,
-    }, tmpDir);
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 500,
+        completion_tokens: 50,
+      },
+      tmpDir,
+    );
     const row = readLog()[1].split(',');
     expect(parseInt(row[6], 10)).toBe(550); // total
   });
 
   it('handles zero usage values without crashing', () => {
-    logGeminiUsage(groupFolder, {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-    }, tmpDir);
+    logGeminiUsage(
+      groupFolder,
+      {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      },
+      tmpDir,
+    );
     const row = readLog()[1].split(',');
     expect(parseFloat(row[7])).toBe(0);
   });
