@@ -17,12 +17,16 @@ describe('checkBashCommand — allowed commands', () => {
   });
 
   it('allows pipe chains where every segment is allowed', () => {
-    expect(checkBashCommand('curl -sL https://x.com | markitdown -x html')).toBeNull();
+    expect(
+      checkBashCommand('curl -sL https://x.com | markitdown -x html'),
+    ).toBeNull();
   });
 
   it('allows && chains where every segment is allowed', () => {
     expect(
-      checkBashCommand('curl -sL https://x.com -o /tmp/in.pdf && markitdown /tmp/in.pdf'),
+      checkBashCommand(
+        'curl -sL https://x.com -o /tmp/in.pdf && markitdown /tmp/in.pdf',
+      ),
     ).toBeNull();
   });
 
@@ -55,11 +59,15 @@ describe('checkBashCommand — semicolon injection (the original bug)', () => {
     // Pre-fix this would slip through: split('|', '&&') saw the whole string
     // as one segment, first word "curl" was allowed, and the shell then ran
     // `; rm -rf /` afterward.
-    expect(checkBashCommand('curl https://x.com ; rm -rf /tmp')).toMatch(/not allowed/);
+    expect(checkBashCommand('curl https://x.com ; rm -rf /tmp')).toMatch(
+      /not allowed/,
+    );
   });
 
   it('blocks semicolon without spaces', () => {
-    expect(checkBashCommand('curl https://x.com;rm /tmp/foo')).toMatch(/not allowed/);
+    expect(checkBashCommand('curl https://x.com;rm /tmp/foo')).toMatch(
+      /not allowed/,
+    );
   });
 
   it('blocks chained allowed-then-disallowed via newline', () => {
@@ -67,7 +75,9 @@ describe('checkBashCommand — semicolon injection (the original bug)', () => {
   });
 
   it('blocks single-& backgrounding to a disallowed command', () => {
-    expect(checkBashCommand('curl https://x.com & rm /tmp/foo')).toMatch(/not allowed/);
+    expect(checkBashCommand('curl https://x.com & rm /tmp/foo')).toMatch(
+      /not allowed/,
+    );
   });
 });
 
@@ -99,15 +109,21 @@ describe('checkBashCommand — redirect operators', () => {
   });
 
   it('blocks stderr redirect 2>', () => {
-    expect(checkBashCommand('curl https://x.com 2> /tmp/err')).toMatch(/redirects/);
+    expect(checkBashCommand('curl https://x.com 2> /tmp/err')).toMatch(
+      /redirects/,
+    );
   });
 
   it('blocks combined redirect &>', () => {
-    expect(checkBashCommand('curl https://x.com &> /tmp/all')).toMatch(/redirects/);
+    expect(checkBashCommand('curl https://x.com &> /tmp/all')).toMatch(
+      /redirects/,
+    );
   });
 
   it('does NOT block curl -o (a flag, not a redirect)', () => {
-    expect(checkBashCommand('curl -sL https://x.com -o /tmp/out.pdf')).toBeNull();
+    expect(
+      checkBashCommand('curl -sL https://x.com -o /tmp/out.pdf'),
+    ).toBeNull();
   });
 });
 
