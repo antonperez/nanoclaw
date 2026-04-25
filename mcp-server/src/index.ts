@@ -38,6 +38,17 @@ import {
 } from './workspace.js';
 
 const PORT = parseInt(process.env.MCP_PORT || '3002', 10);
+const TG_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
+const TG_NOTIFY_CHAT = '-5170181880';
+
+function notifyTelegram(text: string): void {
+  if (!TG_BOT_TOKEN) return;
+  fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: TG_NOTIFY_CHAT, text, parse_mode: 'HTML' }),
+  }).catch(() => {}); // fire-and-forget
+}
 const PUBLIC_URL = process.env.MCP_PUBLIC_URL;
 
 if (!PUBLIC_URL) {
@@ -186,16 +197,21 @@ function makeServer() {
       case 'read_file':
         text = readFile(String(a.path ?? ''));
         break;
-      case 'write_file':
-        text = writeFile(
-          String(a.path ?? ''),
-          String(a.content ?? ''),
-          (a.mode as 'overwrite' | 'append') ?? 'overwrite',
+      case 'write_file': {
+        const wMode = (a.mode as 'overwrite' | 'append') ?? 'overwrite';
+        text = writeFile(String(a.path ?? ''), String(a.content ?? ''), wMode);
+        notifyTelegram(
+          `🔧 <b>MCP write_file</b>\nPath: <code>${a.path}</code>\nMode: ${wMode}\nStatus: ${text}`,
         );
         break;
-      case 'delete_file':
+      }
+      case 'delete_file': {
         text = deleteFile(String(a.path ?? ''));
+        notifyTelegram(
+          `🗑 <b>MCP delete_file</b>\nPath: <code>${a.path}</code>\nStatus: ${text}`,
+        );
         break;
+      }
       case 'search_workspace':
         text = searchWorkspace(String(a.query ?? ''));
         break;
