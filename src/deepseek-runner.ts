@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NewMessage } from './types.js';
 import {
   DEEPSEEK_API_KEY,
@@ -5,14 +6,27 @@ import {
   DEEPSEEK_MODEL,
 } from './config.js';
 import { logger } from './logger.js';
+import { logUsage } from './token-logger.js';
+
+// DeepSeek-V3 (deepseek-chat) pricing USD per 1M tokens. Update if pricing changes.
+const DS_INPUT_USD_PER_M = 0.27;
+const DS_CACHED_USD_PER_M = 0.07;
+const DS_OUTPUT_USD_PER_M = 1.10;
 
 interface AnthropicMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
+interface AnthropicUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
 interface AnthropicResponse {
   content: Array<{ type: string; text: string }>;
+  usage?: AnthropicUsage;
   error?: { message: string };
 }
 
@@ -92,6 +106,19 @@ export async function runDeepSeekAgent(
   if (result) {
     await onOutput(result);
     logger.info({ chars: result.length }, 'DeepSeek response sent');
+  }
+
+  if (data.usage) {
+    const u = data.usage;
+    const input = u.input_tokens ?? 0;
+    const cached = u.cache_read_input_tokens ?? 0;
+    const output = u.output_tokens ?? 0;
+    const total = input + cached + output;
+    const cost =
+      (input * DS_INPUT_USD_PER_M) / 1_000_000 +
+      (cached * DS_CACHED_USD_PER_M) / 1_000_000 +
+      (output * DS_OUTPUT_USD_PER_M) / 1_000_000;
+    logUsage(path.basename(groupDir), DEEPSEEK_MODEL, input, cached, output, total, cost);
   }
 
   return 'success';

@@ -7,11 +7,12 @@ import {
   GEMINI_API_KEY,
   GEMINI_BASE_URL,
   GEMINI_CONFIGURED,
+  GEMINI_MAX_TOOL_TURNS,
   GEMINI_MODEL,
 } from './config.js';
 import { getMemoryHot } from './db.js';
 import { logger } from './logger.js';
-import { GEMINI_MAX_TOOL_TURNS } from './config.js';
+import { logUsage } from './token-logger.js';
 
 interface GeminiMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -52,35 +53,21 @@ const GEMINI_FLASH_CACHED_INPUT_USD_PER_M = 0.075;
 const GEMINI_FLASH_OUTPUT_USD_PER_M = 2.5;
 
 export function logGeminiUsage(
-  groupDir: string,
   groupFolder: string,
   usage: GeminiUsage | undefined,
+  logDir?: string,
 ): void {
   if (!usage) return;
-  try {
-    const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
-    const promptTotal = usage.prompt_tokens ?? 0;
-    const uncachedInput = Math.max(promptTotal - cached, 0);
-    const output = usage.completion_tokens ?? 0;
-    const total = usage.total_tokens ?? promptTotal + output;
-    const cost =
-      (uncachedInput * GEMINI_FLASH_INPUT_USD_PER_M) / 1_000_000 +
-      (cached * GEMINI_FLASH_CACHED_INPUT_USD_PER_M) / 1_000_000 +
-      (output * GEMINI_FLASH_OUTPUT_USD_PER_M) / 1_000_000;
-
-    const logPath = path.join(groupDir, 'notes', 'gemini-token-log.csv');
-    if (!fs.existsSync(logPath)) {
-      fs.mkdirSync(path.dirname(logPath), { recursive: true });
-      fs.writeFileSync(
-        logPath,
-        'timestamp,group,model,input_tokens,cached_tokens,output_tokens,total_tokens,cost_usd\n',
-      );
-    }
-    const line = `${new Date().toISOString()},${groupFolder},${GEMINI_MODEL},${uncachedInput},${cached},${output},${total},${cost.toFixed(6)}\n`;
-    fs.appendFileSync(logPath, line);
-  } catch (err) {
-    logger.warn({ err }, 'Gemini token log write failed');
-  }
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+  const promptTotal = usage.prompt_tokens ?? 0;
+  const uncachedInput = Math.max(promptTotal - cached, 0);
+  const output = usage.completion_tokens ?? 0;
+  const total = usage.total_tokens ?? promptTotal + output;
+  const cost =
+    (uncachedInput * GEMINI_FLASH_INPUT_USD_PER_M) / 1_000_000 +
+    (cached * GEMINI_FLASH_CACHED_INPUT_USD_PER_M) / 1_000_000 +
+    (output * GEMINI_FLASH_OUTPUT_USD_PER_M) / 1_000_000;
+  logUsage(groupFolder, GEMINI_MODEL, uncachedInput, cached, output, total, cost, logDir);
 }
 
 interface FileIndexCache {
@@ -521,7 +508,7 @@ export async function runGeminiAgent(
       return 'error';
     }
 
-    logGeminiUsage(groupDir, groupFolder, data.usage);
+    logGeminiUsage(groupFolder, data.usage);
 
     if (data.error) {
       logger.error({ error: data.error.message }, 'Gemini API error');
@@ -596,7 +583,7 @@ export async function runGeminiAgent(
   );
   try {
     const data = await geminiChat(conversation, false);
-    logGeminiUsage(groupDir, groupFolder, data.usage);
+    logGeminiUsage(groupFolder, data.usage);
     const result = (data.choices?.[0]?.message?.content ?? '').trim();
     if (result) await onOutput(result);
   } catch (err) {

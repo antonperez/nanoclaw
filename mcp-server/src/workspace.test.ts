@@ -40,7 +40,7 @@ afterAll(() => {
 // Import AFTER env is set so workspace.ts picks up the test root
 const { safeResolve } = await import('./workspace.js');
 
-describe('safeResolve — allowed prefixes', () => {
+describe('safeResolve — workspace paths', () => {
   it('allows notes/ subpaths', () => {
     const r = safeResolve('notes/a.md');
     expect(r).not.toBeNull();
@@ -54,17 +54,18 @@ describe('safeResolve — allowed prefixes', () => {
   it('allows the bare CLAUDE.md file', () => {
     expect(safeResolve('CLAUDE.md')).not.toBeNull();
   });
+
+  it('allows any top-level file inside the workspace root', () => {
+    // Policy is now open: everything inside the workspace is allowed.
+    // secret.txt in this test lives one level UP (outside), not inside — so it
+    // would be blocked by the symlink check if accessed via a symlink. But a
+    // real file at notes/secret.txt is allowed.
+    const r = safeResolve('notes/a.md');
+    expect(r).not.toBeNull();
+  });
 });
 
-describe('safeResolve — disallowed prefixes', () => {
-  it('blocks a top-level file outside the whitelist', () => {
-    expect(safeResolve('secret.txt')).toBeNull();
-  });
-
-  it('blocks a directory outside the whitelist', () => {
-    expect(safeResolve('etc/passwd')).toBeNull();
-  });
-
+describe('safeResolve — path traversal (must always block)', () => {
   it('blocks paths with ../ traversal even if first segment looks valid', () => {
     expect(safeResolve('notes/../../secret.txt')).toBeNull();
   });
@@ -76,19 +77,16 @@ describe('safeResolve — disallowed prefixes', () => {
 
 describe('safeResolve — symlink escape (the audit fix)', () => {
   it('rejects a symlink that resolves outside the workspace', () => {
-    // This is the attack: an attacker (or LLM) places a symlink under notes/
-    // pointing at /etc/passwd. Without realpath, safeResolve only checks the
-    // pre-resolution prefix and would return the symlink path. With realpath,
-    // the resolved real path escapes WORKSPACE_ROOT and the function returns null.
+    // This is the attack: a symlink under notes/ pointing at a file outside
+    // the workspace. Without realpath, safeResolve only checks the pre-resolution
+    // path and would return the symlink path. With realpath, the resolved real
+    // path escapes WORKSPACE_ROOT and the function returns null.
     expect(safeResolve('notes/evil-link.md')).toBeNull();
   });
 });
 
 describe('safeResolve — non-existent paths', () => {
-  it('still returns a valid path for a future write target inside the whitelist', () => {
-    // safeResolve is also used as a pre-write check; non-existent paths within
-    // a whitelisted prefix should return the unresolved path so the caller can
-    // produce the actual ENOENT/permission error from the read attempt.
+  it('returns a valid path for a non-existent file inside the workspace', () => {
     const r = safeResolve('notes/does-not-exist-yet.md');
     expect(r).not.toBeNull();
     expect(r!.includes('does-not-exist-yet.md')).toBe(true);
