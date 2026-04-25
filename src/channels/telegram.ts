@@ -284,12 +284,11 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:text', async (ctx) => {
-      // Skip commands (allow /reset through for onMessage handler)
-      if (
-        ctx.message.text.startsWith('/') &&
-        !ctx.message.text.trim().startsWith('/reset')
-      )
-        return;
+      // Skip messages that have dedicated bot.command() handlers above.
+      // Everything else with a leading "/" (e.g. /reset, /wiki, /compact) falls
+      // through to the orchestrator so Gemini/Claude can route them.
+      const trimmed = ctx.message.text.trim();
+      if (/^\/(chatid|ping)\b/i.test(trimmed)) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
