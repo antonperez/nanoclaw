@@ -164,6 +164,90 @@ export function queryDb(db: string, sql: string): string {
   }
 }
 
+/**
+ * Write or append to a file in WORKSPACE_ROOT only (not store/).
+ * Uses realpathSync on the parent directory to block symlink escapes.
+ * Returns "ok" on success or an error string.
+ */
+export function writeFile(
+  relPath: string,
+  content: string,
+  mode: 'overwrite' | 'append' = 'overwrite',
+): string {
+  const cleaned = relPath.replace(/^\/+/, '');
+  if (cleaned.includes('..')) return `Error: path "${relPath}" not allowed`;
+  if (cleaned === 'store' || cleaned.startsWith('store/')) {
+    return 'Error: writes to store/ are not allowed';
+  }
+  if (content.length > 200_000) {
+    return 'Error: content too large (max 200 KB)';
+  }
+
+  const resolved = path.resolve(WORKSPACE_ROOT, cleaned);
+  if (!resolved.startsWith(WORKSPACE_ROOT)) {
+    return `Error: path "${relPath}" not allowed`;
+  }
+
+  // Symlink escape check: resolve the parent (which must exist) and verify
+  // it stays inside WORKSPACE_ROOT_REAL.
+  const parentDir = path.dirname(resolved);
+  try {
+    const realParent = fs.realpathSync(parentDir);
+    if (!realParent.startsWith(WORKSPACE_ROOT_REAL)) {
+      return `Error: path "${relPath}" not allowed`;
+    }
+  } catch {
+    // Parent doesn't exist yet — mkdirSync will create it below; the
+    // string-prefix check above is sufficient for brand-new paths.
+  }
+
+  try {
+    fs.mkdirSync(parentDir, { recursive: true });
+    if (mode === 'append') {
+      fs.appendFileSync(resolved, content, 'utf8');
+    } else {
+      fs.writeFileSync(resolved, content, 'utf8');
+    }
+    return 'ok';
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+/**
+ * Delete a file or empty directory in WORKSPACE_ROOT only (not store/).
+ * Uses realpathSync to block symlink escapes before unlinking.
+ * Returns "ok" on success or an error string.
+ */
+export function deleteFile(relPath: string): string {
+  const cleaned = relPath.replace(/^\/+/, '');
+  if (cleaned.includes('..')) return `Error: path "${relPath}" not allowed`;
+  if (cleaned === 'store' || cleaned.startsWith('store/')) {
+    return 'Error: deletes in store/ are not allowed';
+  }
+
+  const resolved = path.resolve(WORKSPACE_ROOT, cleaned);
+  if (!resolved.startsWith(WORKSPACE_ROOT)) {
+    return `Error: path "${relPath}" not allowed`;
+  }
+
+  try {
+    const real = fs.realpathSync(resolved);
+    if (!real.startsWith(WORKSPACE_ROOT_REAL)) {
+      return `Error: path "${relPath}" not allowed`;
+    }
+    const stat = fs.statSync(real);
+    if (stat.isDirectory()) {
+      fs.rmdirSync(real); // only removes empty dirs
+    } else {
+      fs.unlinkSync(real);
+    }
+    return 'ok';
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 export function getRecentCaptures(hours = 24, limit = 50): string {
   const dbPath = path.join(STORE_ROOT, 'messages.db');
   if (!fs.existsSync(dbPath)) return 'Error: messages.db not found';

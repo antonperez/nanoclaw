@@ -30,6 +30,8 @@ import { NanoClawOAuthProvider } from './oauth.js';
 import {
   listFiles,
   readFile,
+  writeFile,
+  deleteFile,
   searchWorkspace,
   getRecentCaptures,
   queryDb,
@@ -106,6 +108,45 @@ const TOOLS = [
     },
   },
   {
+    name: 'write_file',
+    description:
+      'Write or append to a file in the NanoClaw workspace (groups/telegram_main only — store/ is read-only). Creates parent directories automatically.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Relative file path (e.g. "notes/ideas.md")',
+        },
+        content: {
+          type: 'string',
+          description: 'Content to write',
+        },
+        mode: {
+          type: 'string',
+          enum: ['overwrite', 'append'],
+          description: 'Write mode: "overwrite" (default) replaces the file, "append" adds to end',
+        },
+      },
+      required: ['path', 'content'],
+    },
+  },
+  {
+    name: 'delete_file',
+    description:
+      'Delete a file or empty directory in the NanoClaw workspace (groups/telegram_main only — store/ is protected). Use with care — no undo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Relative file path to delete (e.g. "notes/draft.md")',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
     name: 'query_db',
     description:
       'Run a read-only SQL SELECT against a NanoClaw SQLite database. Available databases: messages (messages, scheduled_tasks, registered_groups, memory_hot, sessions), store (general), nanoclaw. Returns CSV with header.',
@@ -144,6 +185,16 @@ function makeServer() {
         break;
       case 'read_file':
         text = readFile(String(a.path ?? ''));
+        break;
+      case 'write_file':
+        text = writeFile(
+          String(a.path ?? ''),
+          String(a.content ?? ''),
+          (a.mode as 'overwrite' | 'append') ?? 'overwrite',
+        );
+        break;
+      case 'delete_file':
+        text = deleteFile(String(a.path ?? ''));
         break;
       case 'search_workspace':
         text = searchWorkspace(String(a.query ?? ''));
