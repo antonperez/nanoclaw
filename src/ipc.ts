@@ -112,9 +112,10 @@ async function processIpcDir(
   for (const file of files) {
     const filePath = path.join(dir, file);
     try {
-      const data = JSON.parse(
-        fs.readFileSync(filePath, 'utf-8'),
-      ) as Record<string, unknown>;
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<
+        string,
+        unknown
+      >;
       await handler(data);
       fs.unlinkSync(filePath);
     } catch (err) {
@@ -177,10 +178,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
           if (data.type === 'message' && data.chatJid && data.text) {
             const targetGroup = registeredGroups[data.chatJid as string];
             if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
-              if (
-                data.sender &&
-                (data.chatJid as string).startsWith('tg:')
-              ) {
+              if (data.sender && (data.chatJid as string).startsWith('tg:')) {
                 await sendPoolMessage(
                   data.chatJid as string,
                   data.text as string,
@@ -193,7 +191,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   data.text as string,
                 );
               }
-              logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+              logger.info(
+                { chatJid: data.chatJid, sourceGroup },
+                'IPC message sent',
+              );
             } else {
               logger.warn(
                 { chatJid: data.chatJid, sourceGroup },
@@ -225,7 +226,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
         'email',
         sourceGroup,
         async (data) => {
-          if (data.type === 'send_email' && data.to && data.subject && data.body) {
+          if (
+            data.type === 'send_email' &&
+            data.to &&
+            data.subject &&
+            data.body
+          ) {
             const transporter = createEmailTransporter();
             if (!transporter) {
               logger.warn(
@@ -238,7 +244,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const resolved =
                 Array.isArray(data.attachments) &&
                 (data.attachments as string[]).length
-                  ? resolveAttachments(data.attachments as string[], sourceGroup)
+                  ? resolveAttachments(
+                      data.attachments as string[],
+                      sourceGroup,
+                    )
                   : [];
               const attachments = resolved.length ? resolved : undefined;
               await transporter.sendMail({

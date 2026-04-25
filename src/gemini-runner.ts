@@ -173,9 +173,21 @@ function readMdFile(groupDir: string, relativePath: string): string {
 const execAsync = promisify(exec);
 
 const BASH_ALLOWED_CMDS = new Set([
-  'curl', 'markitdown', 'nanoclaw-vision',
-  'ls', 'find', 'cat', 'head', 'tail',
-  'echo', 'wc', 'grep', 'pwd', 'stat', 'file', 'mkdir',
+  'curl',
+  'markitdown',
+  'nanoclaw-vision',
+  'ls',
+  'find',
+  'cat',
+  'head',
+  'tail',
+  'echo',
+  'wc',
+  'grep',
+  'pwd',
+  'stat',
+  'file',
+  'mkdir',
 ]);
 const BASH_MAX_OUTPUT = 50_000;
 
@@ -206,10 +218,18 @@ async function runBash(groupDir: string, command: string): Promise<string> {
       maxBuffer: BASH_MAX_OUTPUT,
     });
     const out = (stdout || '').slice(0, BASH_MAX_OUTPUT);
-    return out || (stderr ? `stderr: ${stderr.slice(0, 1_000)}` : '(no output)');
+    return (
+      out || (stderr ? `stderr: ${stderr.slice(0, 1_000)}` : '(no output)')
+    );
   } catch (e: unknown) {
-    const ex = e as { stdout?: string; stderr?: string; code?: number; message?: string };
-    const detail = ((ex.stderr ?? '').slice(0, 2_000) || ex.message) ?? String(e);
+    const ex = e as {
+      stdout?: string;
+      stderr?: string;
+      code?: number;
+      message?: string;
+    };
+    const detail =
+      ((ex.stderr ?? '').slice(0, 2_000) || ex.message) ?? String(e);
     return `Error (exit ${ex.code ?? 1}): ${detail}`;
   }
 }

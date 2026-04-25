@@ -338,7 +338,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       hadError = true;
       if (!outputSentToUser) {
         // Notify the user so the failure is visible; cursor will roll back for retry.
-        channel.sendMessage(chatJid, 'Something went wrong, please try again.').catch(() => {});
+        channel
+          .sendMessage(chatJid, 'Something went wrong, please try again.')
+          .catch(() => {});
       }
     }
   } else if (routingDecision.model === 'ollama') {
