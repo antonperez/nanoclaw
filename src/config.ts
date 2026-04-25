@@ -123,6 +123,11 @@ export const DEEPSEEK_API_KEY =
 export const DEEPSEEK_MODEL =
   process.env.DEEPSEEK_MODEL || envConfig.DEEPSEEK_MODEL || 'deepseek-chat';
 
+export const GEMINI_MAX_TOOL_TURNS = parseInt(
+  process.env.GEMINI_MAX_TOOL_TURNS || '15',
+  10,
+);
+
 // Gemini — OpenAI-compatible default backend
 export const GEMINI_BASE_URL =
   process.env.GEMINI_BASE_URL ||

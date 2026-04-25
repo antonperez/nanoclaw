@@ -13,10 +13,13 @@ const HOT_EVENT_MAX_CHARS = 500;
 const HOT_CONTEXT_HOURS = 4;
 // Days of warm summaries injected into context
 const WARM_CONTEXT_DAYS = 7;
+// Purge expired entries every N writes rather than on every write
+const PURGE_EVERY_N_WRITES = 20;
+let hotWriteCounter = 0;
 
 /**
  * Record an event to memory_hot. Truncates long content and opportunistically
- * purges expired entries on every write.
+ * purges expired entries every N writes.
  */
 export function recordHotEvent(
   groupFolder: string,
@@ -29,7 +32,10 @@ export function recordHotEvent(
       ? content.slice(0, HOT_EVENT_MAX_CHARS - 3) + '...'
       : content;
   addMemoryHot(groupFolder, eventType, truncated, sender);
-  purgeMemoryHot(); // opportunistic cleanup on each write
+  if (++hotWriteCounter >= PURGE_EVERY_N_WRITES) {
+    hotWriteCounter = 0;
+    purgeMemoryHot();
+  }
 }
 
 /**

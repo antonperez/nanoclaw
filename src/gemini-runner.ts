@@ -1,5 +1,7 @@
+import { exec } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import type { NewMessage } from './types.js';
 import {
   GEMINI_API_KEY,
@@ -9,8 +11,7 @@ import {
 } from './config.js';
 import { getMemoryHot } from './db.js';
 import { logger } from './logger.js';
-
-const MAX_TOOL_TURNS = 10;
+import { GEMINI_MAX_TOOL_TURNS } from './config.js';
 
 interface GeminiMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -26,6 +27,13 @@ interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+interface GeminiUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+}
+
 interface GeminiResponse {
   choices: Array<{
     message: {
@@ -34,10 +42,59 @@ interface GeminiResponse {
       tool_calls?: ToolCall[];
     };
   }>;
+  usage?: GeminiUsage;
   error?: { message: string };
 }
 
+// Gemini 2.5 Flash pricing (USD per 1M tokens). Update if Google adjusts.
+const GEMINI_FLASH_INPUT_USD_PER_M = 0.3;
+const GEMINI_FLASH_CACHED_INPUT_USD_PER_M = 0.075;
+const GEMINI_FLASH_OUTPUT_USD_PER_M = 2.5;
+
+export function logGeminiUsage(
+  groupDir: string,
+  groupFolder: string,
+  usage: GeminiUsage | undefined,
+): void {
+  if (!usage) return;
+  try {
+    const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+    const promptTotal = usage.prompt_tokens ?? 0;
+    const uncachedInput = Math.max(promptTotal - cached, 0);
+    const output = usage.completion_tokens ?? 0;
+    const total = usage.total_tokens ?? promptTotal + output;
+    const cost =
+      (uncachedInput * GEMINI_FLASH_INPUT_USD_PER_M) / 1_000_000 +
+      (cached * GEMINI_FLASH_CACHED_INPUT_USD_PER_M) / 1_000_000 +
+      (output * GEMINI_FLASH_OUTPUT_USD_PER_M) / 1_000_000;
+
+    const logPath = path.join(groupDir, 'notes', 'gemini-token-log.csv');
+    if (!fs.existsSync(logPath)) {
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.writeFileSync(
+        logPath,
+        'timestamp,group,model,input_tokens,cached_tokens,output_tokens,total_tokens,cost_usd\n',
+      );
+    }
+    const line = `${new Date().toISOString()},${groupFolder},${GEMINI_MODEL},${uncachedInput},${cached},${output},${total},${cost.toFixed(6)}\n`;
+    fs.appendFileSync(logPath, line);
+  } catch (err) {
+    logger.warn({ err }, 'Gemini token log write failed');
+  }
+}
+
+interface FileIndexCache {
+  index: string;
+  cachedAt: number;
+}
+const fileIndexCache = new Map<string, FileIndexCache>();
+const FILE_INDEX_TTL_MS = 30_000;
+
 function buildFileIndex(groupDir: string): string {
+  const now = Date.now();
+  const cached = fileIndexCache.get(groupDir);
+  if (cached && now - cached.cachedAt < FILE_INDEX_TTL_MS) return cached.index;
+
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(groupDir, { withFileTypes: true });
@@ -53,15 +110,24 @@ function buildFileIndex(groupDir: string): string {
     } else if (entry.isDirectory()) {
       try {
         const count = fs
-          .readdirSync(path.join(groupDir, entry.name), { recursive: true } as Parameters<typeof fs.readdirSync>[1])
-          .filter((f) => typeof f === 'string' && (f as string).endsWith('.md')).length;
-        if (count > 0) lines.push(`- ${entry.name}/  (${count} files — use list_files to browse)`);
+          .readdirSync(path.join(groupDir, entry.name), {
+            recursive: true,
+          } as Parameters<typeof fs.readdirSync>[1])
+          .filter(
+            (f) => typeof f === 'string' && (f as string).endsWith('.md'),
+          ).length;
+        if (count > 0)
+          lines.push(
+            `- ${entry.name}/  (${count} files — use list_files to browse)`,
+          );
       } catch {
         lines.push(`- ${entry.name}/`);
       }
     }
   }
-  return lines.join('\n');
+  const index = lines.join('\n');
+  fileIndexCache.set(groupDir, { index, cachedAt: now });
+  return index;
 }
 
 function listFilesInDir(groupDir: string, relativePath: string): string {
@@ -70,11 +136,13 @@ function listFilesInDir(groupDir: string, relativePath: string): string {
   if (!resolved.startsWith(base)) return 'Error: path outside workspace.';
   try {
     const entries = fs.readdirSync(resolved, { withFileTypes: true });
-    return entries
-      .filter((e) => !e.name.startsWith('.'))
-      .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
-      .filter((n) => n.endsWith('/') || n.endsWith('.md'))
-      .join('\n') || '(empty)';
+    return (
+      entries
+        .filter((e) => !e.name.startsWith('.'))
+        .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
+        .filter((n) => n.endsWith('/') || n.endsWith('.md'))
+        .join('\n') || '(empty)'
+    );
   } catch {
     return `Error: cannot read directory "${relativePath}".`;
   }
@@ -102,6 +170,53 @@ function readMdFile(groupDir: string, relativePath: string): string {
   }
 }
 
+const execAsync = promisify(exec);
+
+const BASH_ALLOWED_CMDS = new Set([
+  'curl', 'markitdown', 'nanoclaw-vision',
+  'ls', 'find', 'cat', 'head', 'tail',
+  'echo', 'wc', 'grep', 'pwd', 'stat', 'file', 'mkdir',
+]);
+const BASH_MAX_OUTPUT = 50_000;
+
+function checkBashCommand(command: string): string | null {
+  if (/\$\(/.test(command) || /`/.test(command))
+    return 'command substitution not allowed';
+  // Block shell output redirects (>) but not comparison operators inside quoted strings.
+  // curl -o is a flag, not a redirect, so this check is safe.
+  if (/ >/.test(command))
+    return 'shell redirects not allowed; use curl -o for file output';
+  const segments = command.split(/\s*(?:\|{1,2}|&&)\s*/);
+  for (const seg of segments) {
+    const first = seg.trim().split(/\s+/)[0]?.toLowerCase();
+    if (!first) continue;
+    if (!BASH_ALLOWED_CMDS.has(first))
+      return `'${first}' not allowed. Permitted: ${[...BASH_ALLOWED_CMDS].join(', ')}`;
+  }
+  return null;
+}
+
+async function runBash(groupDir: string, command: string): Promise<string> {
+  const err = checkBashCommand(command);
+  if (err) return `Error: ${err}`;
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      cwd: groupDir,
+      timeout: 60_000,
+      maxBuffer: BASH_MAX_OUTPUT,
+    });
+    const out = (stdout || '').slice(0, BASH_MAX_OUTPUT);
+    return out || (stderr ? `stderr: ${stderr.slice(0, 1_000)}` : '(no output)');
+  } catch (e: unknown) {
+    const ex = e as { stdout?: string; stderr?: string; code?: number; message?: string };
+    const detail = ((ex.stderr ?? '').slice(0, 2_000) || ex.message) ?? String(e);
+    return `Error (exit ${ex.code ?? 1}): ${detail}`;
+  }
+}
+
+// Files the LLM must not overwrite — identity and schema files
+const WRITE_PROTECTED = new Set(['CLAUDE.md', 'REFERENCE.md']);
+
 function writeMdFile(
   groupDir: string,
   relativePath: string,
@@ -110,6 +225,8 @@ function writeMdFile(
   const resolved = safeResolveMd(groupDir, relativePath);
   if (!resolved)
     return 'Error: only .md files inside the workspace are allowed.';
+  if (WRITE_PROTECTED.has(path.basename(resolved)))
+    return `Error: ${path.basename(resolved)} is write-protected and cannot be overwritten.`;
   try {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, 'utf8');
@@ -179,6 +296,25 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'bash',
+      description:
+        'Run a shell command in the group workspace directory. Use for: curl (fetch URLs/PDFs), markitdown (convert PDF/doc to markdown), nanoclaw-vision (describe images), ls/find/cat (file ops). Pipe (|) and && chaining supported. No shell redirects (>), no rm, no sudo.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: {
+            type: 'string',
+            description:
+              'Shell command to run. CWD is the group workspace. Allowed commands per segment: curl, markitdown, nanoclaw-vision, ls, find, cat, head, tail, echo, wc, grep, pwd, stat, file, mkdir.',
+          },
+        },
+        required: ['command'],
+      },
+    },
+  },
 ];
 
 async function geminiChat(
@@ -208,7 +344,10 @@ async function geminiChat(
   // Retry on transient 503 (high demand) up to 2 extra attempts with backoff
   if (response.status === 503 && attempt < 2) {
     const delay = (attempt + 1) * 3000;
-    logger.warn({ attempt: attempt + 1, delayMs: delay }, 'Gemini 503 — retrying');
+    logger.warn(
+      { attempt: attempt + 1, delayMs: delay },
+      'Gemini 503 — retrying',
+    );
     await new Promise((r) => setTimeout(r, delay));
     return geminiChat(messages, useTools, attempt + 1);
   }
@@ -252,6 +391,24 @@ const MAX_HISTORY_MESSAGES = 30;
 const HOT_MEMORY_HOURS = 48;
 const HOT_MEMORY_MAX = 30;
 
+/**
+ * Drop user messages already represented in hot memory and any from-me echoes.
+ * Only dedupes against past user events — assistant events are excluded from the
+ * set so a user message that happens to repeat wording from a prior reply still
+ * gets through.
+ */
+export function dedupeUserMessages(
+  recentMessages: NewMessage[],
+  hotEvents: { event_type: string; content: string }[],
+): NewMessage[] {
+  const hotUserMsgSet = new Set(
+    hotEvents.filter((e) => e.event_type === 'user').map((e) => e.content),
+  );
+  return recentMessages.filter(
+    (m) => !m.is_from_me && !hotUserMsgSet.has(m.content),
+  );
+}
+
 export async function runGeminiAgent(
   messages: NewMessage[],
   assistantName: string,
@@ -272,17 +429,16 @@ export async function runGeminiAgent(
     .filter((e) => e.event_type === 'user' || e.event_type === 'assistant');
 
   // Cap unprocessed messages to avoid token bloat on first run
-  const recentMessages = messages.filter((m) => m.content.trim()).slice(-MAX_HISTORY_MESSAGES);
+  const recentMessages = messages
+    .filter((m) => m.content.trim())
+    .slice(-MAX_HISTORY_MESSAGES);
 
-  // Merge hot memory events with recent messages, deduplicating by content+role
-  // Hot memory provides assistant replies; recentMessages provides the new user turn(s)
-  const hotMsgSet = new Set(hotEvents.map((e) => e.content));
-  const newUserMessages = recentMessages.filter(
-    (m) => !m.is_from_me && !hotMsgSet.has(m.content),
-  );
+  const newUserMessages = dedupeUserMessages(recentMessages, hotEvents);
 
   const hotConversation: GeminiMessage[] = hotEvents.map((e) => ({
-    role: (e.event_type === 'assistant' ? 'assistant' : 'user') as GeminiMessage['role'],
+    role: (e.event_type === 'assistant'
+      ? 'assistant'
+      : 'user') as GeminiMessage['role'],
     content: e.content,
   }));
 
@@ -295,7 +451,7 @@ export async function runGeminiAgent(
     })),
   ];
 
-  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+  for (let turn = 0; turn < GEMINI_MAX_TOOL_TURNS; turn++) {
     let data: GeminiResponse;
     try {
       data = await geminiChat(conversation, true);
@@ -303,6 +459,8 @@ export async function runGeminiAgent(
       logger.error({ err }, 'Gemini request failed');
       return 'error';
     }
+
+    logGeminiUsage(groupDir, groupFolder, data.usage);
 
     if (data.error) {
       logger.error({ error: data.error.message }, 'Gemini API error');
@@ -355,6 +513,9 @@ export async function runGeminiAgent(
       } else if (name === 'write_file') {
         toolResult = writeMdFile(groupDir, args.path ?? '', args.content ?? '');
         logger.debug({ file: args.path }, 'Gemini write_file');
+      } else if (name === 'bash') {
+        toolResult = await runBash(groupDir, args.command ?? '');
+        logger.debug({ cmd: args.command }, 'Gemini bash');
       } else {
         toolResult = `Error: unknown tool "${name}"`;
       }
@@ -369,11 +530,12 @@ export async function runGeminiAgent(
   }
 
   logger.warn(
-    { turns: MAX_TOOL_TURNS },
+    { turns: GEMINI_MAX_TOOL_TURNS },
     'Gemini hit max tool turns, forcing final response',
   );
   try {
     const data = await geminiChat(conversation, false);
+    logGeminiUsage(groupDir, groupFolder, data.usage);
     const result = (data.choices?.[0]?.message?.content ?? '').trim();
     if (result) await onOutput(result);
   } catch (err) {

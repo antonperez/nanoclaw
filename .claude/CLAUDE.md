@@ -7,35 +7,24 @@ The routing logic lives in `src/model-router.ts` and runs in the host process be
 
 All messages go to Gemini by default. Gemini has read/write access to `.md` files in the group folder, so it can save notes, tasks, and memory between conversations.
 
-## Force-Claude Container Triggers
+## Triggers — all prefix-only
 
-| Trigger | Example |
-|---------|---------|
-| `claude` | "claude, write me a script" |
-| `andy` | "andy, help me debug this" |
+A trigger only fires when the keyword is the **first word** of the message (case-insensitive, leading whitespace tolerated). Mid-sentence mentions stay on the default Gemini path.
 
-Spawns the full Claude Code CLI container with MCP tools, file system access, and session continuity. Use for complex agentic tasks.
+| Backend | Triggers | Example |
+|---------|----------|---------|
+| **Claude container** (Sonnet, full tools) | `claude`, `andy` | "andy, help me debug this" |
+| **DeepSeek** | `ds`, `deepseek` | "ds write a sorting algorithm" |
+| **Ollama** (local Pi) | `vault`, `ollama` | "vault, what's 2+2?" |
+| **Gemini** (explicit, same as default) | `gem`, `gemini` | "gem summarize this" |
 
-## Force-DeepSeek Triggers
+What this means in practice:
+- ✓ `andy, read me on Tejas` → Claude
+- ✗ `what did andy say yesterday` → **Gemini** (no longer false-positives to Claude)
+- ✗ `compare claude.ai vs gemini` → **Gemini**
+- ✗ `let's use ollama locally` → **Gemini**
 
-| Trigger | Example |
-|---------|---------|
-| `ds` (message prefix) | "ds write a sorting algorithm" |
-| `deepseek` (message prefix) | "deepseek solve this equation" |
-
-## Force-Gemini Triggers (explicit opt-in, same as default)
-
-| Trigger | Example |
-|---------|---------|
-| `gem` (message prefix) | "gem summarize this" |
-| `gemini` (message prefix) | "gemini explain this" |
-
-## Force-Local Triggers (Ollama)
-
-| Trigger | Example |
-|---------|---------|
-| `vault` | "vault, what's 2+2?" |
-| `ollama` | "ollama, quick question" |
+Note: `/wiki ingest` and `/wiki lint` run on Gemini (has bash tool). Only force Claude with `andy /wiki ingest` if Gemini fails.
 
 ## Configuration (.env)
 

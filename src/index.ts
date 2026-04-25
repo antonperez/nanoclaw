@@ -224,10 +224,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+  const reloadCount = resetContextReload[chatJid];
   let missedMessages;
-  if (resetContextReload[chatJid]) {
-    const reloadCount = resetContextReload[chatJid];
-    delete resetContextReload[chatJid];
+  if (reloadCount) {
     missedMessages = getRecentMessages(chatJid, ASSISTANT_NAME, reloadCount);
   } else {
     missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
@@ -320,7 +319,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
         recordHotEvent(group.folder, 'assistant', text);
-        // Persist Gemini reply so it appears in future message history
+        // Two separate writes serve different purposes: storeMessageDirect persists
+        // the reply for cursor recovery (getLastBotMessageTimestamp); recordHotEvent
+        // feeds it back as conversation context on the next turn. Both are needed.
         storeMessageDirect({
           id: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           chat_jid: chatJid,
@@ -333,7 +334,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         });
       },
     );
-    if (result === 'error') hadError = true;
+    if (result === 'error') {
+      hadError = true;
+      if (!outputSentToUser) {
+        // Notify the user so the failure is visible; cursor will roll back for retry.
+        channel.sendMessage(chatJid, 'Something went wrong, please try again.').catch(() => {});
+      }
+    }
   } else if (routingDecision.model === 'ollama') {
     // Fast local path — direct Ollama call, no container overhead
     const result = await runOllamaAgent(
@@ -389,9 +396,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      delete resetContextReload[chatJid];
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // Roll back cursor so retries can re-process these messages.
+    // Keep resetContextReload so the retry uses the same reload window.
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(
@@ -401,6 +410,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  delete resetContextReload[chatJid];
   return true;
 }
 

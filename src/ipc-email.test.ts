@@ -30,6 +30,7 @@ vi.mock('nodemailer', () => ({
 
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-ipc-test',
+  GROUPS_DIR: '/tmp/nanoclaw-ipc-test/groups',
   IPC_POLL_INTERVAL: 100,
   TIMEZONE: 'UTC',
 }));

@@ -5,27 +5,24 @@ export interface RoutingDecision {
   reason: string;
 }
 
-// Keywords that always force DeepSeek (checked before others)
+// All triggers are prefix-only: keyword must be the first word of the message
+// (case-insensitive, leading whitespace tolerated). Mid-sentence mentions are
+// ignored so messages like "what did andy say" or "compare claude vs gemini"
+// stay on the default Gemini path instead of accidentally routing.
 const FORCE_DEEPSEEK: RegExp[] = [/^\s*ds\b/i, /^\s*deepseek\b/i];
-
-// "claude" or "andy" forces the full Claude container agent
-const FORCE_CLAUDE: RegExp[] = [/\bclaude\b/i, /\bandy\b/i];
-
-// Keywords that always force local Ollama model
-const FORCE_LOCAL: RegExp[] = [/\bvault\b/i, /\bollama\b/i];
-
-// Keywords that explicitly force Gemini (already the default, but useful for overriding force- prefixes)
+const FORCE_CLAUDE: RegExp[] = [/^\s*claude\b/i, /^\s*andy\b/i];
+const FORCE_LOCAL: RegExp[] = [/^\s*vault\b/i, /^\s*ollama\b/i];
 const FORCE_GEMINI: RegExp[] = [/^\s*gem\b/i, /^\s*gemini\b/i];
 
 /**
  * Decide which AI backend to use based on the latest user message.
  *
- * Priority order:
- *  1. Force-deepseek prefix ("ds", "deepseek") → DeepSeek
- *  2. Force-claude keyword ("andy") → Claude container agent
- *  3. Force-local keywords ("vault", "ollama") → Ollama
- *  4. Force-gemini prefix ("gem", "gemini") → Gemini
- *  5. Default → Gemini
+ * Priority order (all prefix-only):
+ *  1. "ds" / "deepseek"     → DeepSeek
+ *  2. "claude" / "andy"     → Claude container agent
+ *  3. "vault" / "ollama"    → Ollama (local)
+ *  4. "gem" / "gemini"      → Gemini (explicit; overrides nothing since Gemini is also default)
+ *  5. Anything else         → Gemini (default)
  */
 export function routeMessage(lastUserMessage: string): RoutingDecision {
   for (const pattern of FORCE_DEEPSEEK) {
