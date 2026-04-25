@@ -102,27 +102,18 @@ function buildFileIndex(groupDir: string): string {
     return '';
   }
 
+  // Sort alphabetically and emit dir names without file counts.
+  // Sorting keeps the prefix stable across readdir() ordering quirks; dropping
+  // counts means the index only changes when top-level structure changes,
+  // which lets Gemini's implicit prompt cache actually hit.
   const lines: string[] = [];
-  for (const entry of entries) {
+  const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of sorted) {
     if (entry.name.startsWith('.')) continue;
     if (entry.isFile() && entry.name.endsWith('.md')) {
       lines.push(`- ${entry.name}`);
     } else if (entry.isDirectory()) {
-      try {
-        const count = fs
-          .readdirSync(path.join(groupDir, entry.name), {
-            recursive: true,
-          } as Parameters<typeof fs.readdirSync>[1])
-          .filter(
-            (f) => typeof f === 'string' && (f as string).endsWith('.md'),
-          ).length;
-        if (count > 0)
-          lines.push(
-            `- ${entry.name}/  (${count} files — use list_files to browse)`,
-          );
-      } catch {
-        lines.push(`- ${entry.name}/`);
-      }
+      lines.push(`- ${entry.name}/`);
     }
   }
   const index = lines.join('\n');
@@ -191,14 +182,18 @@ const BASH_ALLOWED_CMDS = new Set([
 ]);
 const BASH_MAX_OUTPUT = 50_000;
 
-function checkBashCommand(command: string): string | null {
+/** Exported for security tests. Returns null if allowed, error string if blocked. */
+export function checkBashCommand(command: string): string | null {
+  // Block command substitution: $(...) and `...`
   if (/\$\(/.test(command) || /`/.test(command))
     return 'command substitution not allowed';
-  // Block shell output redirects (>) but not comparison operators inside quoted strings.
-  // curl -o is a flag, not a redirect, so this check is safe.
-  if (/ >/.test(command))
+  // Block any redirect operators: >, >>, <, <<, 2>, &>, 2>>, etc.
+  // curl uses the -o flag (no redirect symbol) so legitimate downloads still work.
+  if (/(?<!\w)([12&]?>{1,2}|<{1,2})/.test(command))
     return 'shell redirects not allowed; use curl -o for file output';
-  const segments = command.split(/\s*(?:\|{1,2}|&&)\s*/);
+  // Split on ALL chain operators: |, ||, &, &&, ;, newline. The previous version
+  // missed `;` which made `curl ... ; rm -rf /` slip through allowlist checks.
+  const segments = command.split(/\s*(?:\|{1,2}|&{1,2}|;|\n)\s*/);
   for (const seg of segments) {
     const first = seg.trim().split(/\s+/)[0]?.toLowerCase();
     if (!first) continue;
@@ -361,12 +356,17 @@ async function geminiChat(
     body: JSON.stringify(body),
   });
 
-  // Retry on transient 503 (high demand) up to 2 extra attempts with backoff
-  if (response.status === 503 && attempt < 2) {
+  // Retry on transient errors (429 rate limit, 5xx server) up to 2 extra
+  // attempts with linear backoff. Daily-driver Gemini Flash hits 429 on
+  // bursty traffic; 5xx covers 500/502/503/504 cleanly.
+  const transient =
+    response.status === 429 ||
+    (response.status >= 500 && response.status < 600);
+  if (transient && attempt < 2) {
     const delay = (attempt + 1) * 3000;
     logger.warn(
-      { attempt: attempt + 1, delayMs: delay },
-      'Gemini 503 — retrying',
+      { status: response.status, attempt: attempt + 1, delayMs: delay },
+      'Gemini transient error — retrying',
     );
     await new Promise((r) => setTimeout(r, delay));
     return geminiChat(messages, useTools, attempt + 1);
@@ -380,17 +380,49 @@ async function geminiChat(
   return response.json() as Promise<GeminiResponse>;
 }
 
-function buildSystemPrompt(assistantName: string, groupDir: string): string {
-  // Always inject CLAUDE.md so Gemini has user context without a tool-call round trip
-  let claudeMd = '';
+function loadDoc(groupDir: string, relPath: string, label: string): string {
+  const fullPath = path.join(groupDir, relPath);
+  let content: string;
   try {
-    const claudePath = path.join(groupDir, 'CLAUDE.md');
-    if (fs.existsSync(claudePath)) {
-      claudeMd = `\n\n---\n${fs.readFileSync(claudePath, 'utf8').trim()}\n---`;
-    }
-  } catch {
-    // ignore
+    if (!fs.existsSync(fullPath)) return '';
+    content = fs.readFileSync(fullPath, 'utf8').trim();
+  } catch (err) {
+    // Surface load failures so we don't silently run without expected context
+    // (e.g., file became unreadable due to permission change, broken symlink).
+    logger.warn(
+      { err, path: relPath, label },
+      'Failed to load context doc — Gemini will run without it',
+    );
+    return '';
   }
+  if (!content) return '';
+  return `---\n## ${label} (${relPath})\n${content}\n---`;
+}
+
+function buildSystemPrompt(
+  assistantName: string,
+  groupDir: string,
+  wikiOp: boolean,
+): string {
+  // Always inject CLAUDE.md and workspace-layout.md so Gemini has user context
+  // and filing path conventions without a tool-call round trip. WORKFLOW.md is
+  // injected only on /wiki triggers — non-wiki messages skip the extra ~1KB.
+  const docs = [
+    loadDoc(groupDir, 'CLAUDE.md', 'Personal context'),
+    loadDoc(
+      groupDir,
+      'knowledgebase/system/workspace-layout.md',
+      'Filing paths',
+    ),
+    loadDoc(
+      groupDir,
+      'knowledgebase/system/operating-rules.md',
+      'Operating rules',
+    ),
+    wikiOp ? loadDoc(groupDir, 'wiki/WORKFLOW.md', 'Wiki workflow') : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const index = buildFileIndex(groupDir);
   const fileIndex = index
@@ -400,7 +432,7 @@ function buildSystemPrompt(assistantName: string, groupDir: string): string {
   return [
     `You are ${assistantName}, a proactive personal assistant. Be concise and direct. Connect the dots across context — notice patterns, surface relevant past notes, and anticipate what the user needs.`,
     'Format for WhatsApp/Telegram: use *single asterisks* for bold, _underscores_ for italic, • for bullets. No ## headings, no **double stars**, no [markdown links](url).',
-    claudeMd,
+    docs,
     fileIndex,
   ]
     .filter(Boolean)
@@ -455,6 +487,12 @@ export async function runGeminiAgent(
 
   const newUserMessages = dedupeUserMessages(recentMessages, hotEvents);
 
+  // Detect a /wiki trigger in the new user batch so we can inject WORKFLOW.md
+  // for ingest/query/lint without polluting non-wiki conversations.
+  const wikiOp = newUserMessages.some((m) =>
+    /^\s*\/wiki\b/i.test(m.content || ''),
+  );
+
   const hotConversation: GeminiMessage[] = hotEvents.map((e) => ({
     role: (e.event_type === 'assistant'
       ? 'assistant'
@@ -463,7 +501,10 @@ export async function runGeminiAgent(
   }));
 
   const conversation: GeminiMessage[] = [
-    { role: 'system', content: buildSystemPrompt(assistantName, groupDir) },
+    {
+      role: 'system',
+      content: buildSystemPrompt(assistantName, groupDir, wikiOp),
+    },
     ...hotConversation,
     ...newUserMessages.map((m) => ({
       role: 'user' as GeminiMessage['role'],

@@ -13,7 +13,7 @@ A trigger only fires when the keyword is the **first word** of the message (case
 
 | Backend | Triggers | Example |
 |---------|----------|---------|
-| **Claude container** (Sonnet, full tools) | `claude`, `andy` | "andy, help me debug this" |
+| **Claude container** (Sonnet, full tools) | `claude`, `andy`, `/council` | "andy, help me debug this" |
 | **DeepSeek** | `ds`, `deepseek` | "ds write a sorting algorithm" |
 | **Ollama** (local Pi) | `vault`, `ollama` | "vault, what's 2+2?" |
 | **Gemini** (explicit, same as default) | `gem`, `gemini` | "gem summarize this" |
@@ -37,7 +37,7 @@ OLLAMA_HOST=http://localhost:11434   # Ollama API base URL
 OLLAMA_MODEL=anton-vault             # Local model name
 ```
 
-The credential proxy (port 3001) routes Claude containers to `https://api.anthropic.com` using `CLAUDE_CODE_OAUTH_TOKEN`.
+NanoClaw routes Claude container traffic directly to `https://api.anthropic.com` using `ANTHROPIC_AUTH_TOKEN` (pay-per-token API billing, separate from any claude.ai subscription).
 
 ## Key Files
 
