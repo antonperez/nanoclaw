@@ -67,10 +67,13 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
-const TOKEN_LOG_PATH = '/workspace/group/notes/token-log.csv';
+const TOKEN_LOG_PATH = '/workspace/project/store/tokens.csv';
+const TOKEN_LOG_HEADER =
+  'timestamp,group,model,input_tokens,cached_tokens,output_tokens,total_tokens,cost_usd';
 
 function logTokenUsage(
-  sessionId: string,
+  groupFolder: string,
+  model: string,
   inputTokens: number,
   outputTokens: number,
   cacheReadTokens: number,
@@ -79,22 +82,18 @@ function logTokenUsage(
 ): void {
   try {
     const timestamp = new Date().toISOString();
-    const totalInputTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
-    const totalTokens = totalInputTokens + outputTokens;
+    // cache_creation billed at input rate; fold into input for the unified log
+    const totalInput = inputTokens + cacheCreationTokens;
+    const totalTokens = totalInput + cacheReadTokens + outputTokens;
 
-    const needsHeader = !fs.existsSync(TOKEN_LOG_PATH);
-    if (needsHeader) {
-      fs.mkdirSync(path.dirname(TOKEN_LOG_PATH), { recursive: true });
-      fs.writeFileSync(
-        TOKEN_LOG_PATH,
-        'timestamp,session_id,input_tokens,cache_read_tokens,cache_creation_tokens,output_tokens,total_tokens,cost_usd\n',
-      );
+    if (!fs.existsSync(TOKEN_LOG_PATH)) {
+      fs.writeFileSync(TOKEN_LOG_PATH, TOKEN_LOG_HEADER + '\n');
     }
 
-    const line = `${timestamp},${sessionId},${inputTokens},${cacheReadTokens},${cacheCreationTokens},${outputTokens},${totalTokens},${costUsd.toFixed(6)}\n`;
+    const line = `${timestamp},${groupFolder},${model},${totalInput},${cacheReadTokens},${outputTokens},${totalTokens},${costUsd.toFixed(6)}\n`;
     fs.appendFileSync(TOKEN_LOG_PATH, line);
     log(
-      `Token usage: input=${inputTokens} cache_read=${cacheReadTokens} cache_creation=${cacheCreationTokens} output=${outputTokens} total=${totalTokens} cost=$${costUsd.toFixed(4)}`,
+      `Token usage: input=${totalInput} cached=${cacheReadTokens} output=${outputTokens} total=${totalTokens} cost=$${costUsd.toFixed(4)}`,
     );
   } catch (err) {
     log(`Token log write failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -262,7 +261,8 @@ async function runQuery(
 
   // Log token usage
   logTokenUsage(
-    sid,
+    containerInput.groupFolder,
+    model,
     result.usage.input_tokens,
     result.usage.output_tokens,
     result.usage.cache_read_input_tokens,

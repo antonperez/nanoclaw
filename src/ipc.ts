@@ -381,10 +381,20 @@ export async function processTaskIpc(
         const taskId =
           data.taskId ||
           `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // Cron tasks notify the group chat if a cron-notify-jid file is present.
+        const cronNotifyFile = path.join(
+          GROUPS_DIR,
+          targetFolder,
+          'cron-notify-jid',
+        );
+        const effectiveChatJid =
+          scheduleType === 'cron' && fs.existsSync(cronNotifyFile)
+            ? fs.readFileSync(cronNotifyFile, 'utf8').trim()
+            : targetJid;
         createTask({
           id: taskId,
           group_folder: targetFolder,
-          chat_jid: targetJid,
+          chat_jid: effectiveChatJid,
           prompt: data.prompt,
           script: data.script || null,
           schedule_type: scheduleType,

@@ -7,48 +7,67 @@ const WORKSPACE_ROOT = path.resolve(
     '/home/anton/nanoclaw/groups/telegram_main',
 );
 
-// Folders / file patterns the MCP server is allowed to read.
-// Whitelist: anything matching these prefixes is readable. Everything else is blocked.
-const ALLOWED_PREFIXES = [
-  'notes/',
-  'crm/',
-  'wiki/',
-  'knowledgebase/',
-  'journal/',
-  'projects/',
-  'work/',
-  'archives/',
-  'CLAUDE.md',
-];
+// store/ is a symlink at <project-root>/store → /mnt/pi/nanoclaw/store.
+// Exposed under the virtual prefix "store/" in all MCP tools.
+const PROJECT_ROOT = path.resolve(WORKSPACE_ROOT, '..', '..');
+const STORE_ROOT = path.resolve(PROJECT_ROOT, 'store');
 
-/** Exported for security tests. Returns absolute resolved path or null if blocked. */
+// Resolve real (post-symlink) roots once at startup for boundary checks.
+const WORKSPACE_ROOT_REAL = (() => {
+  try { return fs.realpathSync(WORKSPACE_ROOT); } catch { return WORKSPACE_ROOT; }
+})();
+const STORE_ROOT_REAL = (() => {
+  try { return fs.realpathSync(STORE_ROOT); } catch { return STORE_ROOT; }
+})();
+
+/**
+ * Exported for security tests.
+ * Returns the absolute resolved path or null if:
+ *  - the path contains '..' (traversal attempt)
+ *  - after symlink resolution it escapes its root
+ *
+ * Two roots are allowed:
+ *  - Everything under WORKSPACE_ROOT  (groups/telegram_main/)
+ *  - Everything under STORE_ROOT      (store/, virtual prefix)
+ */
 export function safeResolve(relPath: string): string | null {
   const cleaned = relPath.replace(/^\/+/, '');
   if (cleaned.includes('..')) return null;
-  if (!ALLOWED_PREFIXES.some((p) => cleaned.startsWith(p) || cleaned === p)) {
-    return null;
-  }
-  const resolved = path.resolve(WORKSPACE_ROOT, cleaned);
-  if (!resolved.startsWith(WORKSPACE_ROOT)) return null;
 
-  // Resolve symlinks and verify the *real* path is still inside the workspace.
-  // Without this, a symlink under e.g. notes/ pointing at /etc would let a
-  // crafted read_file leak host files. realpath fails for non-existent paths,
-  // which is fine — those return null and the caller surfaces "path not allowed".
+  // "store" and "store/..." are resolved against the project root so the
+  // symlink traversal check can work against STORE_ROOT_REAL.
+  const isStore = cleaned === 'store' || cleaned.startsWith('store/');
+  const baseRoot = isStore ? PROJECT_ROOT : WORKSPACE_ROOT;
+  const allowedReal = isStore ? STORE_ROOT_REAL : WORKSPACE_ROOT_REAL;
+
+  const resolved = path.resolve(baseRoot, cleaned);
+
+  // Pre-symlink check: must still be inside the base root.
+  const baseAllowed = isStore ? STORE_ROOT : WORKSPACE_ROOT;
+  if (!resolved.startsWith(baseAllowed)) return null;
+
   try {
     const real = fs.realpathSync(resolved);
-    if (!real.startsWith(WORKSPACE_ROOT)) return null;
+    if (!real.startsWith(allowedReal)) return null;
     return real;
   } catch {
-    // Path doesn't exist yet — that's an error for read tools, but we let the
-    // caller produce the actual ENOENT message. Return the unresolved path; it
-    // hasn't escaped the prefix check above.
+    // File doesn't exist yet — return unresolved path so callers can surface ENOENT.
     return resolved;
   }
 }
 
 export function listFiles(relPath: string): string {
-  const resolved = safeResolve(relPath || '');
+  // Root listing: all non-hidden entries in WORKSPACE_ROOT + store/.
+  if (!relPath || relPath === '/') {
+    const wsEntries = fs.readdirSync(WORKSPACE_ROOT, { withFileTypes: true })
+      .filter((e) => !e.name.startsWith('.'))
+      .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
+      .sort();
+    if (fs.existsSync(STORE_ROOT)) wsEntries.push('store/');
+    return wsEntries.join('\n');
+  }
+
+  const resolved = safeResolve(relPath);
   if (!resolved) return `Error: path "${relPath}" not allowed`;
   try {
     const entries = fs.readdirSync(resolved, { withFileTypes: true });
@@ -78,36 +97,17 @@ export function readFile(relPath: string): string {
 
 export function searchWorkspace(query: string, maxResults = 30): string {
   if (!query || query.length < 2) return 'Error: query too short';
-  // Use ripgrep if available for speed, fall back to grep.
   const cmd = (() => {
-    try {
-      execFileSync('which', ['rg']);
-      return 'rg';
-    } catch {
-      return 'grep';
-    }
+    try { execFileSync('which', ['rg']); return 'rg'; } catch { return 'grep'; }
   })();
+
+  // Search all of WORKSPACE_ROOT plus STORE_ROOT.
+  const searchRoots = [WORKSPACE_ROOT, STORE_ROOT].filter((p) => fs.existsSync(p));
 
   const args =
     cmd === 'rg'
-      ? [
-          '--max-count=3',
-          '--max-filesize=200k',
-          '-i',
-          '-l',
-          query,
-          ...ALLOWED_PREFIXES.map((p) => path.join(WORKSPACE_ROOT, p)).filter(
-            (p) => fs.existsSync(p),
-          ),
-        ]
-      : [
-          '-rli',
-          '--include=*.md',
-          query,
-          ...ALLOWED_PREFIXES.map((p) => path.join(WORKSPACE_ROOT, p)).filter(
-            (p) => fs.existsSync(p),
-          ),
-        ];
+      ? ['--max-count=3', '--max-filesize=200k', '-i', '-l', query, ...searchRoots]
+      : ['-rli', '--include=*.md', query, ...searchRoots];
 
   try {
     const out = execFileSync(cmd, args, {
@@ -120,7 +120,13 @@ export function searchWorkspace(query: string, maxResults = 30): string {
       .split('\n')
       .filter(Boolean)
       .slice(0, maxResults)
-      .map((p) => path.relative(WORKSPACE_ROOT, p));
+      .map((p) => {
+        // Show store/ paths with their virtual prefix.
+        if (p.startsWith(STORE_ROOT_REAL)) {
+          return 'store/' + path.relative(STORE_ROOT_REAL, p);
+        }
+        return path.relative(WORKSPACE_ROOT, p);
+      });
     return files.length ? files.join('\n') : '(no matches)';
   } catch (err: unknown) {
     const e = err as { status?: number; stderr?: string };
@@ -129,14 +135,39 @@ export function searchWorkspace(query: string, maxResults = 30): string {
   }
 }
 
+export function queryDb(db: string, sql: string): string {
+  const normalized = sql.trim().replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  if (!/^SELECT\b/i.test(normalized)) {
+    return 'Error: only SELECT statements are allowed';
+  }
+
+  const dbFile = db.endsWith('.db') ? db : `${db}.db`;
+  const dbPath = path.join(STORE_ROOT, dbFile);
+  if (!dbPath.startsWith(STORE_ROOT) || dbFile.includes('..')) {
+    return 'Error: invalid db name';
+  }
+  if (!fs.existsSync(dbPath)) {
+    const available = fs.readdirSync(STORE_ROOT).filter((f) => f.endsWith('.db')).join(', ');
+    return `Error: "${db}" not found. Available: ${available}`;
+  }
+
+  try {
+    const out = execFileSync('sqlite3', ['-readonly', '-csv', '-header', dbPath, sql], {
+      encoding: 'utf8',
+      maxBuffer: 2_000_000,
+      timeout: 10_000,
+    });
+    return out.trim() || '(no rows)';
+  } catch (err) {
+    const e = err as { stderr?: string };
+    return `Error: ${e.stderr || String(err)}`;
+  }
+}
+
 export function getRecentCaptures(hours = 24, limit = 50): string {
-  const dbPath = path.resolve(WORKSPACE_ROOT, '..', '..', 'store/messages.db');
+  const dbPath = path.join(STORE_ROOT, 'messages.db');
   if (!fs.existsSync(dbPath)) return 'Error: messages.db not found';
   const sinceIso = new Date(Date.now() - hours * 3600_000).toISOString();
-  // Use sqlite3 CLI (no native deps, already installed on the Pi).
-  // Fields are joined with char(1) (SOH, 0x01) — a real byte the JS split below
-  // matches on. The earlier version wrote the literal text '' which never
-  // matched the SOH in the JS split, returning garbage.
   const sql =
     `SELECT timestamp || char(1) || is_from_me || char(1) || substr(content, 1, 500) ` +
     `FROM messages WHERE timestamp > '${sinceIso.replace(/'/g, "''")}' ` +
@@ -152,7 +183,7 @@ export function getRecentCaptures(hours = 24, limit = 50): string {
       .split('\n')
       .reverse()
       .map((line) => {
-        const [ts, isFromMe, content] = line.split('');
+        const [ts, isFromMe, content] = line.split('\x01');
         return `[${ts}] ${isFromMe === '1' ? 'assistant' : 'anton'}: ${content ?? ''}`;
       })
       .join('\n\n');

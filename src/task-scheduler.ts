@@ -1,8 +1,14 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  GROUPS_DIR,
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -322,10 +328,15 @@ export function ensureMemorySummaryTask(
   const interval = CronExpressionParser.parse('0 3 * * *', { tz: TIMEZONE });
   const nextRun = interval.next().toISOString();
 
+  const cronNotifyFile = path.join(GROUPS_DIR, groupFolder, 'cron-notify-jid');
+  const effectiveChatJid = fs.existsSync(cronNotifyFile)
+    ? fs.readFileSync(cronNotifyFile, 'utf8').trim()
+    : chatJid;
+
   createTask({
     id: taskId,
     group_folder: groupFolder,
-    chat_jid: chatJid,
+    chat_jid: effectiveChatJid,
     prompt: '__MEMORY_SUMMARY__',
     script: null,
     schedule_type: 'cron',

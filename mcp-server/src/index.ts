@@ -32,6 +32,7 @@ import {
   readFile,
   searchWorkspace,
   getRecentCaptures,
+  queryDb,
 } from './workspace.js';
 
 const PORT = parseInt(process.env.MCP_PORT || '3002', 10);
@@ -104,6 +105,25 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'query_db',
+    description:
+      'Run a read-only SQL SELECT against a NanoClaw SQLite database. Available databases: messages (messages, scheduled_tasks, registered_groups, memory_hot, sessions), store (general), nanoclaw. Returns CSV with header.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        db: {
+          type: 'string',
+          description: 'Database name without extension: "messages", "store", or "nanoclaw"',
+        },
+        sql: {
+          type: 'string',
+          description: 'SELECT statement to run',
+        },
+      },
+      required: ['db', 'sql'],
+    },
+  },
 ];
 
 function makeServer() {
@@ -130,6 +150,9 @@ function makeServer() {
         break;
       case 'recent_captures':
         text = getRecentCaptures(Number(a.hours ?? 24));
+        break;
+      case 'query_db':
+        text = queryDb(String(a.db ?? ''), String(a.sql ?? ''));
         break;
       default:
         text = `Error: unknown tool "${name}"`;
