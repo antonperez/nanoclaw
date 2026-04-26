@@ -340,7 +340,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Notify the user so the failure is visible; cursor will roll back for retry.
         channel
           .sendMessage(chatJid, 'Something went wrong, please try again.')
-          .catch(() => {});
+          .catch((e: unknown) => logger.warn({ err: e, chatJid }, 'error notify send failed'));
       }
     }
   } else if (routingDecision.model === 'ollama') {

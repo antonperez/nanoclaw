@@ -39,15 +39,15 @@ import {
 
 const PORT = parseInt(process.env.MCP_PORT || '3002', 10);
 const TG_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
-const TG_NOTIFY_CHAT = '-5170181880';
+const TG_NOTIFY_CHAT = process.env.TG_NOTIFY_CHAT || '';
 
 function notifyTelegram(text: string): void {
-  if (!TG_BOT_TOKEN) return;
+  if (!TG_BOT_TOKEN || !TG_NOTIFY_CHAT) return;
   fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ chat_id: TG_NOTIFY_CHAT, text, parse_mode: 'HTML' }),
-  }).catch(() => {}); // fire-and-forget
+  }).catch((e: unknown) => console.warn('[mcp] notify failed:', e));
 }
 const PUBLIC_URL = process.env.MCP_PUBLIC_URL;
 
