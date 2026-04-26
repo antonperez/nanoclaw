@@ -114,19 +114,33 @@ export class NanoClawOAuthProvider implements OAuthServerProvider {
   }
 
   private persist(): void {
+    let step = 'init';
     try {
+      step = 'mkdirSync';
       mkdirSync(dirname(STATE_PATH), { recursive: true });
-      const state: PersistedState = {
-        clients: Object.fromEntries(this.clients),
-        accessTokens: Object.fromEntries(this.accessTokens),
-        refreshTokens: Object.fromEntries(this.refreshTokens),
-      };
-      // Write atomically: write to .tmp then rename
+
+      step = 'Object.fromEntries(clients)';
+      const clientsObj = Object.fromEntries(this.clients);
+      step = 'Object.fromEntries(accessTokens)';
+      const accessObj = Object.fromEntries(this.accessTokens);
+      step = 'Object.fromEntries(refreshTokens)';
+      const refreshObj = Object.fromEntries(this.refreshTokens);
+
+      step = 'JSON.stringify';
+      const json = JSON.stringify({ clients: clientsObj, accessTokens: accessObj, refreshTokens: refreshObj }, null, 2);
+
+      step = 'writeFileSync(.tmp)';
       const tmp = `${STATE_PATH}.tmp`;
-      writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
+      writeFileSync(tmp, json, { mode: 0o600 });
+
+      step = 'renameSync';
       renameSync(tmp, STATE_PATH);
     } catch (err) {
-      console.warn(`[oauth] failed to persist state: ${err instanceof Error ? err.message : err}`);
+      const msg = err instanceof Error ? err.stack ?? err.message : String(err);
+      const ctor = err instanceof Error ? err.constructor.name : typeof err;
+      console.warn(
+        `[oauth] failed to persist state at step="${step}" (${ctor}): ${msg}`,
+      );
     }
   }
 
