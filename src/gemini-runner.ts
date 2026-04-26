@@ -401,7 +401,7 @@ function buildSystemPrompt(
   wikiOp: boolean,
 ): string {
   // Always inject CLAUDE.md and workspace-layout.md so Gemini has user context
-  // and filing path conventions without a tool-call round trip. WORKFLOW.md is
+  // and filing path conventions without a tool-call round trip. workflow.md is
   // injected only on /wiki triggers — non-wiki messages skip the extra ~1KB.
   const docs = [
     loadDoc(groupDir, 'CLAUDE.md', 'Personal context'),
@@ -415,7 +415,7 @@ function buildSystemPrompt(
       'knowledgebase/system/operating-rules.md',
       'Operating rules',
     ),
-    wikiOp ? loadDoc(groupDir, 'wiki/WORKFLOW.md', 'Wiki workflow') : '',
+    wikiOp ? loadDoc(groupDir, 'wiki/workflow.md', 'Wiki workflow') : '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -483,7 +483,7 @@ export async function runGeminiAgent(
 
   const newUserMessages = dedupeUserMessages(recentMessages, hotEvents);
 
-  // Detect a /wiki trigger in the new user batch so we can inject WORKFLOW.md
+  // Detect a /wiki trigger in the new user batch so we can inject workflow.md
   // for ingest/query/lint without polluting non-wiki conversations.
   const wikiOp = newUserMessages.some((m) =>
     /^\s*\/wiki\b/i.test(m.content || ''),
