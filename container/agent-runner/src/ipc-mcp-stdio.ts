@@ -475,8 +475,47 @@ function stripHtml(html: string): string {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&mdash;/gi, '—')
+    .replace(/&ndash;/gi, '–')
+    .replace(/&hellip;/gi, '…')
+    .replace(/&lsquo;/gi, '‘')
+    .replace(/&rsquo;/gi, '’')
+    .replace(/&ldquo;/gi, '“')
+    .replace(/&rdquo;/gi, '”')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ''; } })
+    .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n, 10)); } catch { return ''; } })
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+async function readCapped(r: Response, maxBytes = 2_000_000): Promise<string> {
+  const reader = r.body?.getReader();
+  if (!reader) return (await r.text()).slice(0, maxBytes);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (total < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.byteLength;
+  }
+  try { await reader.cancel(); } catch { /* noop */ }
+  return new TextDecoder('utf-8', { fatal: false }).decode(
+    Buffer.concat(chunks.map(c => Buffer.from(c)))
+  ).slice(0, maxBytes);
+}
+
+function isSafeUrl(raw: string): { ok: true; url: URL } | { ok: false; reason: string } {
+  let u: URL;
+  try { u = new URL(raw); } catch { return { ok: false, reason: 'invalid URL' }; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, reason: 'only http/https allowed' };
+  const host = u.hostname.toLowerCase();
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0)/.test(host)) return { ok: false, reason: 'private IP blocked' };
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return { ok: false, reason: 'private IP blocked' };
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.lan') || host.endsWith('.home') || host.endsWith('.internal')) return { ok: false, reason: 'local host blocked' };
+  if (host === '::1' || host.startsWith('[::1]') || host.startsWith('[fc') || host.startsWith('[fd')) return { ok: false, reason: 'IPv6 local blocked' };
+  return { ok: true, url: u };
 }
 
 function extractWeatherJson(json: unknown): string {
@@ -510,15 +549,163 @@ function extractNewsHtml(html: string): string {
   return stripHtml(html).slice(0, 500);
 }
 
+const MEDIUM_DOMAINS = new Set([
+  'medium.com',
+  'levelup.gitconnected.com',
+  'uxdesign.cc',
+  'uxplanet.org',
+  'codeburst.io',
+  'itnext.io',
+]);
+
+function isMediumNetwork(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '').replace(/^amp\./, '');
+    if (MEDIUM_DOMAINS.has(host)) return true;
+    if (host.endsWith('.medium.com')) return true;
+    return false;
+  } catch { return false; }
+}
+
+function toScribeUrl(url: string): string {
+  const u = new URL(url);
+  const host = u.hostname.toLowerCase().replace(/^www\./, '').replace(/^amp\./, '');
+  const sub = host.match(/^([a-z0-9-]+)\.medium\.com$/);
+  if (sub && sub[1] !== 'cdn-images' && sub[1] !== 'miro') {
+    u.pathname = `/@${sub[1]}${u.pathname}`;
+  }
+  u.hostname = 'scribe.rip';
+  u.protocol = 'https:';
+  u.port = '';
+  ['source', 'gi', 'sk', '_branch_match_id', '_branch_referrer'].forEach(p => u.searchParams.delete(p));
+  return u.toString();
+}
+
+function pickLongest(html: string, tag: 'article' | 'main'): string | null {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+  let best: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    if (!best || m[1].length > best.length) best = m[1];
+  }
+  return best;
+}
+
+function extractArticleBody(html: string): string {
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? stripHtml(titleMatch[1]) : '';
+  let body = pickLongest(html, 'article') ?? pickLongest(html, 'main') ?? html;
+  body = body
+    .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<figure[\s\S]*?<\/figure>/gi, ' ');
+  const text = stripHtml(body);
+  return title ? `${title}\n\n${text}` : text;
+}
+
+function cleanJinaMarkdown(md: string): string {
+  const contentIdx = md.indexOf('Markdown Content:');
+  let body = contentIdx >= 0 ? md.slice(contentIdx + 'Markdown Content:'.length).trimStart() : md;
+  body = body
+    .replace(/^\[Open in app\][^\n]*\n+/gm, '')
+    .replace(/^\[?Sign in\]?[^\n]*\n+/gm, '')
+    .replace(/^Sign up\s*$/gm, '')
+    .replace(/^(Follow|Listen|Share|Save)\s*$/gm, '')
+    .replace(/^\[Get unlimited access[^\]]*\][^\n]*\n+/gm, '')
+    .replace(/^!\[[^\]]*\]\(https?:\/\/(miro|cdn-images-\d+)\.medium\.com[^)]*\)\s*$/gm, '')
+    .replace(/^\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)\s*$/gm, '')
+    .replace(/\n{3,}/g, '\n\n');
+  const titleMatch = md.match(/^Title:\s*(.+)$/m);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  return title ? `${title}\n\n${body}` : body;
+}
+
+async function fetchMediumArticle(originalUrl: string, maxChars: number): Promise<string | null> {
+  const u = new URL(originalUrl);
+  const host = u.hostname.toLowerCase().replace(/^www\./, '').replace(/^amp\./, '');
+  const scribeCompatible = host === 'medium.com' || host.endsWith('.medium.com');
+
+  const tryScribe = async (): Promise<string> => {
+    const scribeUrl = toScribeUrl(originalUrl);
+    const r = await fetch(scribeUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) throw new Error(`scribe HTTP ${r.status}`);
+    const html = await readCapped(r);
+    const extracted = extractArticleBody(html);
+    const looksLikePaywall =
+      /member[- ]only story/i.test(extracted) ||
+      /sign up to (read|discover)/i.test(extracted.slice(0, 1500)) ||
+      /you've read all your free/i.test(extracted);
+    const looksLikeHomepage = /^Medium\b/i.test(extracted) && extracted.length < 2000;
+    if (!extracted || extracted.length <= 400 || looksLikePaywall || looksLikeHomepage) throw new Error('scribe returned wall/homepage');
+    return extracted.slice(0, maxChars);
+  };
+
+  const tryJina = async (): Promise<string> => {
+    const r = await fetch(`https://r.jina.ai/${originalUrl}`, {
+      headers: {
+        'User-Agent': 'NanoClaw/1.0',
+        'Accept': 'text/plain',
+        'X-Return-Format': 'markdown',
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) throw new Error(`jina HTTP ${r.status}`);
+    const md = await readCapped(r);
+    const cleaned = cleanJinaMarkdown(md);
+    const isWalled =
+      /^Title:\s*Medium\s*$/m.test(md.slice(0, 300)) ||
+      cleaned.length < 400 ||
+      /sign up to (continue|read|discover)/i.test(cleaned.slice(0, 1500)) ||
+      /member[- ]only story/i.test(cleaned.slice(0, 1500)) ||
+      /^Get unlimited access/m.test(cleaned.slice(0, 800));
+    if (isWalled) throw new Error('jina returned wall');
+    return cleaned.slice(0, maxChars);
+  };
+
+  const sources: Promise<string>[] = scribeCompatible ? [tryScribe(), tryJina()] : [tryJina()];
+  try {
+    return await Promise.any(sources);
+  } catch (e) {
+    console.error(`[web_fetch] all sources failed for ${originalUrl}:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 server.tool(
   'web_fetch',
-  'Fetch a URL. Returns truncated text (~500 tokens).',
+  'Fetch a URL. Returns truncated text: ~2000 chars for general pages, ~8000 chars for Medium articles (auto-routed via scribe.rip / r.jina.ai). News pages return headline + first sentence. Weather pages return structured JSON.',
   {
     url: z.string(),
   },
   async (args) => {
     const MAX_CHARS = 2000;
+    const MAX_CHARS_ARTICLE = 8000;
+
+    const safe = isSafeUrl(args.url);
+    if (!safe.ok) {
+      return { content: [{ type: 'text' as const, text: `web_fetch refused: ${safe.reason}` }], isError: true };
+    }
+
     try {
+      if (isMediumNetwork(args.url)) {
+        const article = await fetchMediumArticle(args.url, MAX_CHARS_ARTICLE);
+        if (article) {
+          return { content: [{ type: 'text' as const, text: `[web_fetch: ${args.url}]\n\n${article}` }] };
+        }
+        return {
+          content: [{ type: 'text' as const, text: `[web_fetch: ${args.url}]\n\nUnable to retrieve article (scribe.rip and r.jina.ai both failed or returned a paywall). Try again later.` }],
+          isError: true,
+        };
+      }
+
       const response = await fetch(args.url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
@@ -551,7 +738,7 @@ server.tool(
         const json = await response.json();
         result = isWeather ? extractWeatherJson(json) : JSON.stringify(json).slice(0, MAX_CHARS);
       } else {
-        const html = await response.text();
+        const html = await readCapped(response);
         if (isNews) {
           result = extractNewsHtml(html);
         } else if (isWeather) {
