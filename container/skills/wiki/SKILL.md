@@ -82,12 +82,16 @@ WebFetch returns summaries, not full text. For wiki ingestion, get the full docu
 ```bash
 # Save the raw page
 curl -sLo /workspace/group/sources/filename.html "https://..."
+# Then read the saved file — markitdown can convert it:
+markitdown /workspace/group/sources/filename.html
 
 # For dynamic/paywalled pages use agent-browser:
 agent-browser open https://...
 agent-browser snapshot -i   # see interactive elements
 # Extract text from the snapshot, then proceed
 ```
+
+**IMPORTANT:** `markitdown` does NOT accept a `--url` flag or URLs as arguments. It only converts local files. Always `curl` the URL to a local file first, then pass the local path to `markitdown`.
 
 ### PDFs
 ```bash
