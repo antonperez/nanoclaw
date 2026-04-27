@@ -8,7 +8,7 @@ set -e
 SRC=/home/anton/nanoclaw/groups/telegram_main
 DEST_HOST=anton@amp-macbook.local
 DEST_PATH=/Users/anton/iCloudSource/nanoclaw-data
-STAMP=/mnt/pi/nanoclaw/sync/.last-rsync.stamp
+STAMP=/mnt/pi/nanoclaw/data/.last-rsync.stamp
 LOG=/mnt/pi/nanoclaw/logs/rsync.log
 SSH_KEY=/home/anton/.ssh/id_ed25519
 NOTIFY=/home/anton/nanoclaw/scripts/notify.sh

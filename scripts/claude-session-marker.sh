@@ -13,7 +13,7 @@
 
 set -eu
 
-PENDING="/mnt/pi/nanoclaw/groups/telegram_main/notes/captures-pending.md"
+PENDING="/home/anton/nanoclaw/groups/telegram_main/notes/captures-pending.md"
 
 # Read JSON from stdin, extract session_id and cwd via python (no jq dep).
 INPUT="$(cat)"
