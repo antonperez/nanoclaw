@@ -6,7 +6,7 @@ module.exports = {
       cwd: '/home/anton/nanoclaw',
       interpreter: '/home/anton/.nvm/versions/node/v20.20.2/bin/node',
       out_file: '/mnt/pi/nanoclaw/logs/nanoclaw.log',
-      error_file: '/mnt/pi/nanoclaw/logs/nanoclaw-error.log',
+      error_file: '/dev/null',
       merge_logs: true,
       log_date_format: '',
       env: {
