@@ -343,14 +343,22 @@ async function geminiChat(
     body.tool_choice = 'auto';
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${GEMINI_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Retry on transient errors (429 rate limit, 5xx server) up to 2 extra
   // attempts with linear backoff. Daily-driver Gemini Flash hits 429 on
@@ -425,8 +433,18 @@ function buildSystemPrompt(
     ? `\n\nWorkspace (use list_files to browse a folder, read_file to read, write_file to save):\n${index}`
     : '\n\nNo memory files yet. Use write_file to create notes or memory (e.g. "MEMORY.md").';
 
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  const timeStr = now.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Manila',
+    hour12: false,
+  });
+
   return [
     `You are ${assistantName}, a proactive personal assistant. Be concise and direct. Connect the dots across context — notice patterns, surface relevant past notes, and anticipate what the user needs.`,
+    `Today is ${dateStr} (${timeStr} PHT). When filing journal entries or dated notes, use this exact date.`,
     'Format for WhatsApp/Telegram: use *single asterisks* for bold, _underscores_ for italic, • for bullets. No ## headings, no **double stars**, no [markdown links](url).',
     docs,
     fileIndex,
