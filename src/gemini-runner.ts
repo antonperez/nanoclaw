@@ -162,7 +162,6 @@ const execAsync = promisify(exec);
 const BASH_ALLOWED_CMDS = new Set([
   'curl',
   'markitdown',
-  'brave-search',
   'nanoclaw-vision',
   'ls',
   'find',
@@ -324,7 +323,7 @@ const TOOLS = [
     function: {
       name: 'bash',
       description:
-        'Run a shell command in the group workspace directory. Use for: markitdown (convert URL/PDF/DOCX/HTML to markdown — pass the URL or file path as the ONLY positional arg, e.g. `markitdown "https://example.com/post"` or `markitdown sources/file.pdf`; never use --url, never pipe curl into it), brave-search (web search — e.g. `brave-search "query"` returns top 5 results with URLs), curl (only if markitdown fails on a URL — use `curl -sLo path/file.ext "https://..."` then `markitdown path/file.ext`), nanoclaw-vision (describe images), ls/find/cat (file ops). Pipe (|) and && chaining supported. No shell redirects (>), no rm, no sudo.',
+        'Run a shell command in the group workspace directory. Use for: markitdown (convert URL/PDF/DOCX/HTML to markdown — pass the URL or file path as the ONLY positional arg, e.g. `markitdown "https://example.com/post"` or `markitdown sources/file.pdf`; never use --url, never pipe curl into it), curl (only if markitdown fails on a URL — use `curl -sLo path/file.ext "https://..."` then `markitdown path/file.ext`), nanoclaw-vision (describe images), ls/find/cat (file ops). Pipe (|) and && chaining supported. No shell redirects (>), no rm, no sudo.',
       parameters: {
         type: 'object',
         properties: {
