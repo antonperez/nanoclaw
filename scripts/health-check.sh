@@ -11,6 +11,8 @@ CHAT_ID_FILE="/home/anton/nanoclaw/groups/telegram_main/team-chat-jid"
 ERROR_LOG="/mnt/pi/nanoclaw/logs/nanoclaw.log"
 STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-health-state"
 RESTART_COUNT_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-restart-count"
+ALERT_COOLDOWN_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-alert-cooldown"
+SUSTAINED_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-error-sustained"
 
 # Skip within 2 minutes of boot — pm2 may still be starting up
 UPTIME_SECONDS=$(awk '{print int($1)}' /proc/uptime)
@@ -87,22 +89,48 @@ PM2 auto-restarted nanoclaw ${DELTA}x (total restarts: ${CURRENT_RESTARTS}) at $
   fi
 fi
 
-# --- error threshold check ---
-# Tracks log line position in a tmpfs state file (cleared on reboot, persists between runs).
-# Counts only NEW errors since last check — immune to old entries at the same clock time.
-ERROR_THRESHOLD=3
+# --- error / fatal threshold check ---
+# Line-position tracking persists between runs in tmpfs (cleared on reboot).
+# Tier 1 — FATAL: alert immediately on any new fatal, no threshold.
+# Tier 2 — ERROR: alert only when threshold exceeded in two consecutive checks (sustained).
+# Cooldown: suppress ERROR alerts for 30 min after one fires to avoid spam.
+ERROR_THRESHOLD=10
+COOLDOWN_SECONDS=1800
+
 CURRENT_LINES=$(wc -l < "$ERROR_LOG" 2>/dev/null || echo 0)
 PREV_LINES=$(cat "$STATE_FILE" 2>/dev/null || echo "$CURRENT_LINES")
 echo "$CURRENT_LINES" > "$STATE_FILE"
 
+NEW_FATALS=0
 NEW_ERRORS=0
 if [ "$CURRENT_LINES" -gt "$PREV_LINES" ]; then
-  NEW_ERRORS=$(tail -n "+$((PREV_LINES + 1))" "$ERROR_LOG" 2>/dev/null | grep -c "ERROR" || echo 0)
+  NEW_LINES=$(tail -n "+$((PREV_LINES + 1))" "$ERROR_LOG" 2>/dev/null)
+  NEW_FATALS=$(echo "$NEW_LINES" | grep -c "FATAL" || echo 0)
+  NEW_ERRORS=$(echo "$NEW_LINES" | grep -c "] ERROR" || echo 0)
 fi
 
+# Tier 1: FATAL — always alert immediately
+if [ "$NEW_FATALS" -gt 0 ]; then
+  send_alert "🚨 *NanoClaw fatal error* (Pi4)
+${NEW_FATALS} FATAL event(s) at ${TIMESTAMP}. Immediate attention required."
+fi
+
+# Tier 2: ERROR — require sustained (two consecutive checks above threshold)
 if [ "$NEW_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
-  send_alert "⚠️ *NanoClaw error threshold*
-${NEW_ERRORS} new errors since last check at ${TIMESTAMP}."
+  PREV_OVER=$(cat "$SUSTAINED_FILE" 2>/dev/null || echo 0)
+  echo 1 > "$SUSTAINED_FILE"
+  if [ "$PREV_OVER" -eq 1 ]; then
+    # Check cooldown
+    LAST_ALERT=$(cat "$ALERT_COOLDOWN_FILE" 2>/dev/null || echo 0)
+    NOW=$(date +%s)
+    if [ $(( NOW - LAST_ALERT )) -ge "$COOLDOWN_SECONDS" ]; then
+      echo "$NOW" > "$ALERT_COOLDOWN_FILE"
+      send_alert "⚠️ *NanoClaw error threshold* (Pi4)
+${NEW_ERRORS} new errors in this check (sustained). Threshold: ${ERROR_THRESHOLD}. At ${TIMESTAMP}."
+    fi
+  fi
+else
+  echo 0 > "$SUSTAINED_FILE"
 fi
 
 exit 0
