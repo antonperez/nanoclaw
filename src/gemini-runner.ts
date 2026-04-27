@@ -236,8 +236,13 @@ async function runBash(groupDir: string, command: string): Promise<string> {
   }
 }
 
-// Files the LLM must not overwrite — identity and schema files
-const WRITE_PROTECTED = new Set(['CLAUDE.md', 'REFERENCE.md']);
+// Files the LLM must not overwrite — identity, schema, and system-prompt source files
+const WRITE_PROTECTED = new Set([
+  'CLAUDE.md',
+  'REFERENCE.md',
+  'knowledgebase/system/workspace-layout.md',
+  'knowledgebase/system/operating-rules.md',
+]);
 
 function writeMdFile(
   groupDir: string,
@@ -247,8 +252,9 @@ function writeMdFile(
   const resolved = safeResolveMd(groupDir, relativePath);
   if (!resolved)
     return 'Error: only .md files inside the workspace are allowed.';
-  if (WRITE_PROTECTED.has(path.basename(resolved)))
-    return `Error: ${path.basename(resolved)} is write-protected and cannot be overwritten.`;
+  const rel = relativePath.replace(/^\.\/+/, '');
+  if (WRITE_PROTECTED.has(rel) || WRITE_PROTECTED.has(path.basename(resolved)))
+    return `Error: ${rel} is write-protected and cannot be overwritten.`;
   try {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, 'utf8');
@@ -444,18 +450,14 @@ function buildSystemPrompt(
     ? `\n\nWorkspace (use list_files to browse a folder, read_file to read, write_file to save):\n${index}`
     : '\n\nNo memory files yet. Use write_file to create notes or memory (e.g. "MEMORY.md").';
 
-  const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
-  const timeStr = now.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Asia/Manila',
-    hour12: false,
-  });
+  // Date-only — no per-minute time. Keeping the prefix stable across messages
+  // lets Gemini's implicit cache hit consistently. Time-of-day is injected
+  // per-message in the user turn instead (see stampUserMessages).
+  const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
   return [
     `You are ${assistantName}, a proactive personal assistant. Be concise and direct. Connect the dots across context — notice patterns, surface relevant past notes, and anticipate what the user needs.`,
-    `Today is ${dateStr} (${timeStr} PHT). When filing journal entries or dated notes, use this exact date.`,
+    `Today is ${dateStr} PHT. When filing journal entries or dated notes, use this exact date.`,
     'Format for WhatsApp/Telegram: use *single asterisks* for bold, _underscores_ for italic, • for bullets. No ## headings, no **double stars**, no [markdown links](url).',
     docs,
     fileIndex,
@@ -466,7 +468,7 @@ function buildSystemPrompt(
 
 const MAX_HISTORY_MESSAGES = 30;
 const HOT_MEMORY_HOURS = 48;
-const HOT_MEMORY_MAX = 30;
+const HOT_MEMORY_MAX = 15;
 
 /**
  * Drop user messages already represented in hot memory and any from-me echoes.
@@ -525,16 +527,30 @@ export async function runGeminiAgent(
     content: e.content,
   }));
 
+  const timeStr = new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Manila',
+    hour12: false,
+  });
+
+  const userTurns = newUserMessages.map((m, i) => ({
+    role: 'user' as GeminiMessage['role'],
+    // Stamp only the last incoming message so the model knows the current time
+    // without it landing in the (cached) system prompt.
+    content:
+      i === newUserMessages.length - 1
+        ? `[${timeStr} PHT] ${m.content as string}`
+        : (m.content as string),
+  }));
+
   const conversation: GeminiMessage[] = [
     {
       role: 'system',
       content: buildSystemPrompt(assistantName, groupDir, wikiOp),
     },
     ...hotConversation,
-    ...newUserMessages.map((m) => ({
-      role: 'user' as GeminiMessage['role'],
-      content: m.content as string,
-    })),
+    ...userTurns,
   ];
 
   for (let turn = 0; turn < GEMINI_MAX_TOOL_TURNS; turn++) {
