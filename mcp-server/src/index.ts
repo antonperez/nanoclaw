@@ -35,7 +35,12 @@ import {
   searchWorkspace,
   getRecentCaptures,
   queryDb,
+  initSyncsDb,
+  syncWrite,
+  syncRead,
 } from './workspace.js';
+
+initSyncsDb();
 
 const PORT = parseInt(process.env.MCP_PORT || '3002', 10);
 const TG_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
@@ -160,13 +165,13 @@ const TOOLS = [
   {
     name: 'query_db',
     description:
-      'Run a read-only SQL SELECT against a NanoClaw SQLite database. Available databases: messages (messages, scheduled_tasks, registered_groups, memory_hot, sessions), store (general), nanoclaw. Returns CSV with header.',
+      'Run a read-only SQL SELECT against a NanoClaw SQLite database. Available databases: messages (messages, scheduled_tasks, registered_groups, memory_hot, sessions), store (general), nanoclaw, syncs (cross-project sync bus). Returns CSV with header.',
     inputSchema: {
       type: 'object',
       properties: {
         db: {
           type: 'string',
-          description: 'Database name without extension: "messages", "store", or "nanoclaw"',
+          description: 'Database name without extension: "messages", "store", "nanoclaw", or "syncs"',
         },
         sql: {
           type: 'string',
@@ -174,6 +179,63 @@ const TOOLS = [
         },
       },
       required: ['db', 'sql'],
+    },
+  },
+  {
+    name: 'sync_write',
+    description:
+      'Record a cross-project sync line. Called at the end of a conversation when a decision, pattern, or system change meets the recall test: "would I want to find this in 3 weeks?" Projects: bdo, investmentology, ai-sandbox, antonperez, anton7.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: {
+          type: 'string',
+          enum: ['bdo', 'investmentology', 'ai-sandbox', 'antonperez', 'anton7'],
+          description: 'Project this sync line belongs to',
+        },
+        slot1: {
+          type: 'string',
+          description: 'The decision or insight being consolidated (required)',
+        },
+        slot2: {
+          type: 'string',
+          description: 'Cross-domain consequence in another domain (optional)',
+        },
+        slot3: {
+          type: 'string',
+          description: 'Concrete system change that was made (optional)',
+        },
+        confidence: {
+          type: 'string',
+          enum: ['HIGH', 'LOW'],
+          description: "Recall confidence. Default: 'HIGH'",
+        },
+      },
+      required: ['project', 'slot1'],
+    },
+  },
+  {
+    name: 'sync_read',
+    description:
+      'Retrieve recent sync lines grouped by project. Call automatically at Anton 7.0 session start and on demand when Anton says "sync". Defaults to last 7 days, HIGH confidence only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: {
+          type: 'number',
+          description: 'Lookback window in days (default 7)',
+        },
+        project: {
+          type: 'string',
+          enum: ['bdo', 'investmentology', 'ai-sandbox', 'antonperez', 'anton7'],
+          description: 'Filter to a single project (omit for all)',
+        },
+        confidence: {
+          type: 'string',
+          enum: ['HIGH', 'LOW'],
+          description: "Filter by confidence level. Default: 'HIGH'",
+        },
+      },
     },
   },
 ];
@@ -200,9 +262,6 @@ function makeServer() {
       case 'write_file': {
         const wMode = (a.mode as 'overwrite' | 'append') ?? 'overwrite';
         text = writeFile(String(a.path ?? ''), String(a.content ?? ''), wMode);
-        notifyTelegram(
-          `🔧 <b>MCP write_file</b>\nPath: <code>${a.path}</code>\nMode: ${wMode}\nStatus: ${text}`,
-        );
         break;
       }
       case 'delete_file': {
@@ -220,6 +279,22 @@ function makeServer() {
         break;
       case 'query_db':
         text = queryDb(String(a.db ?? ''), String(a.sql ?? ''));
+        break;
+      case 'sync_write':
+        text = syncWrite(
+          String(a.project ?? ''),
+          String(a.slot1 ?? ''),
+          a.slot2 ? String(a.slot2) : undefined,
+          a.slot3 ? String(a.slot3) : undefined,
+          a.confidence ? String(a.confidence) : undefined,
+        );
+        break;
+      case 'sync_read':
+        text = syncRead(
+          a.days != null ? Number(a.days) : undefined,
+          a.project ? String(a.project) : undefined,
+          a.confidence ? String(a.confidence) : undefined,
+        );
         break;
       default:
         text = `Error: unknown tool "${name}"`;
