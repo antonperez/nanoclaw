@@ -387,6 +387,7 @@ export async function runContainerAgent(
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
+    const stderrTail: string[] = [];
 
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
@@ -460,7 +461,10 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (!line) continue;
+        logger.debug({ container: group.folder }, line);
+        stderrTail.push(line);
+        if (stderrTail.length > 10) stderrTail.shift();
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
@@ -631,6 +635,12 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        if (stderrTail.length > 0) {
+          logger.warn(
+            { group: group.name, code, stderrTail },
+            'Container exited non-zero — last stderr lines',
+          );
+        }
         logger.error(
           {
             group: group.name,
