@@ -208,6 +208,11 @@ export function writeFile(
     } else {
       fs.writeFileSync(resolved, content, 'utf8');
     }
+    // Append a log entry for the weekly digest — fire-and-forget, never throws.
+    try {
+      const entry = JSON.stringify({ ts: new Date().toISOString(), path: cleaned, mode, bytes: content.length }) + '\n';
+      fs.appendFileSync(path.join(STORE_ROOT, 'mcp-writes.jsonl'), entry, 'utf8');
+    } catch { /* log failure must not affect the write result */ }
     return 'ok';
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;

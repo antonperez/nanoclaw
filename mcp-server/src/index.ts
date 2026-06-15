@@ -126,13 +126,13 @@ const TOOLS = [
   {
     name: 'write_file',
     description:
-      'Write or append to a file in the NanoClaw workspace (groups/telegram_main only — store/ is read-only). Creates parent directories automatically.',
+      'Write or append to a file anywhere in the NanoClaw workspace. Paths are relative to workspace root — e.g. "crm/contacts/john.md", "notes/ideas.md", "journal/2026-05.md". Creates parent directories automatically. store/ is protected (read-only).',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Relative file path (e.g. "notes/ideas.md")',
+          description: 'Relative path from workspace root (e.g. "crm/contacts/john.md", "notes/ideas.md")',
         },
         content: {
           type: 'string',
@@ -150,13 +150,13 @@ const TOOLS = [
   {
     name: 'delete_file',
     description:
-      'Delete a file or empty directory in the NanoClaw workspace (groups/telegram_main only — store/ is protected). Use with care — no undo.',
+      'Delete a file or empty directory anywhere in the NanoClaw workspace. Paths are relative to workspace root — e.g. "crm/contacts/john.md", "notes/draft.md". store/ is protected. Use with care — no undo.',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Relative file path to delete (e.g. "notes/draft.md")',
+          description: 'Relative path from workspace root (e.g. "crm/contacts/john.md", "notes/draft.md")',
         },
       },
       required: ['path'],
