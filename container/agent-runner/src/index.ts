@@ -18,7 +18,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { directQuery } from './direct-api.js';
-import { classifyQuery, buildToolFilter } from './query-classifier.js';
+import { classifyQuery } from './query-classifier.js';
 
 interface ContainerInput {
   prompt: string;
@@ -198,8 +198,7 @@ function buildSystemPrompt(assistantName?: string): string {
 }
 
 /**
- * Run a single query using the direct Anthropic Messages API.
- * Bypasses the Claude Code CLI/SDK to eliminate ~12K tokens of overhead.
+ * Run a single query via the Claude Code CLI (OAuth-compatible).
  */
 async function runQuery(
   prompt: string,
@@ -212,12 +211,6 @@ async function runQuery(
 }> {
   const systemPrompt = buildSystemPrompt(containerInput.assistantName);
   log(`System prompt: ${systemPrompt.length} chars (~${Math.round(systemPrompt.length / 4)} tokens)`);
-
-  // Session path — reuse SDK-compatible location so host session tracking works
-  const sessionDir = '/home/node/.claude/projects/-workspace-group';
-  const sid = sessionId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const sessionPath = path.join(sessionDir, `${sid}.jsonl`);
-  fs.mkdirSync(sessionDir, { recursive: true });
 
   // Smart model routing — classify query to pick cheapest adequate model
   const routing = classifyQuery(prompt, containerInput.isScheduledTask ?? false);
@@ -232,17 +225,12 @@ async function runQuery(
   const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
   log(`Model routing: ${model} (reason: ${envModel ? 'env-override' : routing.reason})`);
 
-  // Conditional tool loading — only include tools the prompt actually needs
-  const toolFilter = buildToolFilter(prompt, containerInput.isMain, routing.reason);
-
-  // D: Zero history for scheduled tasks (stateless), E: lower max_tokens for simple queries
   const isScheduled = containerInput.isScheduledTask ?? false;
-  const isSimple = routing.reason === 'simple-pattern';
 
   const result = await directQuery({
     prompt,
     systemPrompt,
-    sessionPath,
+    sessionId,
     mcpServerCommand: 'node',
     mcpServerArgs: [mcpServerPath],
     mcpServerEnv: {
@@ -251,11 +239,7 @@ async function runQuery(
       NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
     },
     maxTurns: isScheduled ? 8 : 15,
-    maxBudgetUsd: isScheduled ? 0.10 : 0.25,
     model,
-    maxHistoryTokens: isScheduled ? 0 : 24000,
-    maxResponseTokens: isSimple ? 512 : 4096,
-    toolFilter,
     log,
   });
 
@@ -274,14 +258,14 @@ async function runQuery(
   writeOutput({
     status: 'success',
     result: result.text,
-    newSessionId: sid,
+    newSessionId: result.sessionId,
   });
 
   log(`Query done. Turns: ${result.turns}, cost: $${result.costUsd.toFixed(4)}`);
 
   // Check for close sentinel that may have arrived during the query
   const closedDuringQuery = shouldClose();
-  return { newSessionId: sid, closedDuringQuery };
+  return { newSessionId: result.sessionId, closedDuringQuery };
 }
 
 interface ScriptResult {

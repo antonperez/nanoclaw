@@ -9,10 +9,15 @@
  *             API key via /api/oauth/claude_cli/create_api_key.
  *             Proxy injects real OAuth token on that exchange request;
  *             subsequent requests carry the temp key which is valid as-is.
+ *             Token is read fresh from ~/.claude/.credentials.json so it
+ *             stays valid across automatic refreshes (expires ~8h).
  */
 import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -134,6 +139,40 @@ function handleDavRequest(
   );
 }
 
+/**
+ * Read the current OAuth access token.
+ * Priority: CLAUDE_CODE_OAUTH_TOKEN env/envfile → ~/.claude/.credentials.json
+ * Cached for 60s to avoid file I/O per request, while still picking up refreshes.
+ */
+let _oauthTokenCache: { token: string; expiresAt: number } | null = null;
+
+function readOAuthToken(envFileToken?: string): string | undefined {
+  // Explicit env override always wins (no caching needed, it's static)
+  if (envFileToken) return envFileToken;
+
+  const now = Date.now();
+  if (_oauthTokenCache && now < _oauthTokenCache.expiresAt) {
+    return _oauthTokenCache.token;
+  }
+
+  // Read from Claude Code's credentials file
+  const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+  try {
+    const raw = fs.readFileSync(credPath, 'utf-8');
+    const creds = JSON.parse(raw) as Record<string, unknown>;
+    const oauth = creds.claudeAiOauth as Record<string, unknown> | undefined;
+    const token = oauth?.accessToken as string | undefined;
+    if (token) {
+      _oauthTokenCache = { token, expiresAt: now + 60_000 };
+      return token;
+    }
+  } catch {
+    // Credentials file absent or unreadable — fall through
+  }
+
+  return undefined;
+}
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
@@ -155,7 +194,9 @@ export function startCredentialProxy(
       : null;
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken = secrets.CLAUDE_CODE_OAUTH_TOKEN;
+  // envFileToken is the static override from .env; readOAuthToken() falls back
+  // to ~/.claude/.credentials.json per request so tokens auto-refresh.
+  const envFileToken = secrets.CLAUDE_CODE_OAUTH_TOKEN;
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -211,8 +252,9 @@ export function startCredentialProxy(
           // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            const token = readOAuthToken(envFileToken);
+            if (token) {
+              headers['authorization'] = `Bearer ${token}`;
             }
           }
         }

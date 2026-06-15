@@ -53,61 +53,16 @@ describe('routeMessage — Ollama triggers', () => {
 
   it('does not route mid-sentence "vault" to ollama', () => {
     expect(routeMessage('I prefer the vault for security').model).toBe(
-      'gemini',
+      'claude',
     );
   });
 
   it('does not route mid-sentence "ollama" to ollama', () => {
-    expect(routeMessage('compare ollama with deepseek').model).toBe('gemini');
+    expect(routeMessage('compare ollama with deepseek').model).toBe('claude');
   });
 
   it('returns force-local reason', () => {
     expect(routeMessage('vault test').reason).toBe('force-local keyword');
-  });
-});
-
-describe('routeMessage — Claude triggers', () => {
-  it('routes "andy" prefix to claude', () => {
-    expect(routeMessage('andy help me debug this').model).toBe('claude');
-  });
-
-  it('routes "Andy" (case-insensitive) to claude', () => {
-    expect(routeMessage('Andy write a function').model).toBe('claude');
-  });
-
-  it('routes "ANDY" (case-insensitive) to claude', () => {
-    expect(routeMessage('ANDY fix this bug').model).toBe('claude');
-  });
-
-  it('routes "andy," (with comma) to claude', () => {
-    expect(routeMessage('andy, read me on Tejas').model).toBe('claude');
-  });
-
-  it('routes "claude" prefix to claude', () => {
-    expect(routeMessage('claude, write me a script').model).toBe('claude');
-  });
-
-  it('routes "Claude" (case-insensitive) to claude', () => {
-    expect(routeMessage('Claude write a function').model).toBe('claude');
-  });
-
-  it('does not route mid-sentence "andy" to claude', () => {
-    expect(routeMessage('what did andy say yesterday').model).toBe('gemini');
-  });
-
-  it('does not route mid-sentence "claude" to claude', () => {
-    expect(routeMessage('compare claude.ai vs gemini').model).toBe('gemini');
-  });
-
-  it('does not route "claude" inside another word to claude', () => {
-    // "claude" appears, but the message starts with another word
-    expect(routeMessage('I think Claude is the best model').model).toBe(
-      'gemini',
-    );
-  });
-
-  it('returns force-claude reason', () => {
-    expect(routeMessage('andy hello').reason).toBe('force-claude keyword');
   });
 });
 
@@ -125,50 +80,60 @@ describe('routeMessage — Gemini triggers', () => {
   });
 });
 
-describe('routeMessage — default routing', () => {
-  it('defaults to gemini for plain messages', () => {
-    expect(routeMessage('what is the weather today?').model).toBe('gemini');
+describe('routeMessage — default routing (Claude)', () => {
+  it('defaults to claude for plain messages', () => {
+    expect(routeMessage('what is the weather today?').model).toBe('claude');
   });
 
-  it('defaults to gemini for empty string', () => {
-    expect(routeMessage('').model).toBe('gemini');
+  it('defaults to claude for empty string', () => {
+    expect(routeMessage('').model).toBe('claude');
   });
 
   it('returns default reason', () => {
     expect(routeMessage('hello').reason).toBe('default');
   });
 
-  it('defaults to gemini when discussing models without a prefix', () => {
+  it('defaults to claude when discussing models without a prefix', () => {
     expect(
       routeMessage('I want to compare andy claude vault and ollama').model,
-    ).toBe('gemini');
+    ).toBe('claude');
+  });
+
+  it('mid-sentence "andy" routes to claude (default)', () => {
+    expect(routeMessage('what did andy say yesterday').model).toBe('claude');
+  });
+
+  it('mid-sentence "claude" routes to claude (default)', () => {
+    expect(routeMessage('compare claude.ai vs gemini').model).toBe('claude');
+  });
+
+  it('message starting with "claude" (not a trigger) routes to claude (default)', () => {
+    expect(routeMessage('I think Claude is the best model').model).toBe(
+      'claude',
+    );
   });
 });
 
 describe('routeMessage — priority order', () => {
-  it('deepseek prefix beats andy keyword (both at start = ds wins by priority)', () => {
+  it('deepseek prefix beats mid-sentence keywords', () => {
     expect(routeMessage('ds andy, write code').model).toBe('deepseek');
   });
 
-  it('andy prefix beats mid-sentence ollama mention', () => {
-    expect(routeMessage('andy using ollama locally').model).toBe('claude');
-  });
-
-  it('claude prefix beats mid-sentence ollama mention', () => {
-    expect(routeMessage('claude using ollama locally').model).toBe('claude');
-  });
-
-  it('gem prefix routes to gemini even when andy appears mid-sentence', () => {
+  it('gem prefix routes to gemini even when other keywords appear mid-sentence', () => {
     expect(routeMessage('gem what would andy say').model).toBe('gemini');
+  });
+
+  it('vault prefix routes to ollama even with claude mid-sentence', () => {
+    expect(routeMessage('vault compare claude and gpt').model).toBe('ollama');
   });
 });
 
 describe('routeMessage — leading whitespace tolerance', () => {
-  it('tolerates leading spaces before andy', () => {
-    expect(routeMessage('   andy what do you think').model).toBe('claude');
-  });
-
   it('tolerates leading spaces before ds', () => {
     expect(routeMessage('  ds quick code').model).toBe('deepseek');
+  });
+
+  it('tolerates leading spaces before gem', () => {
+    expect(routeMessage('  gem summarize this').model).toBe('gemini');
   });
 });

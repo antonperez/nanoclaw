@@ -3,7 +3,6 @@
  * Extracted for testability.
  */
 
-const HAIKU = 'claude-haiku-4-5-20251001';
 const SONNET = 'claude-sonnet-4-20250514';
 
 // Core tools always loaded
@@ -26,19 +25,12 @@ const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
 ];
 
 /**
- * Classify a query to select the cheapest adequate model.
+ * Classify a query to select the model. Sonnet is the default for all cases.
  */
 export function classifyQuery(
-  prompt: string,
-  isScheduledTask: boolean,
+  _prompt: string,
+  _isScheduledTask: boolean,
 ): { model: string; reason: string } {
-  if (isScheduledTask) {
-    return { model: HAIKU, reason: 'scheduled-task' };
-  }
-  const simplePatterns = /^(hi|hello|hey|good morning|good afternoon|good evening|good night|what time|what day|what date|thank|thanks|thank you|ty|ok|okay|sure|yes|no|yep|nope|yea|yeah|nah|cool|nice|great|got it|gm|gn|lol|haha|bye|later|cheers|np|k)\s*[.!?]*$/i;
-  if (simplePatterns.test(prompt.trim())) {
-    return { model: HAIKU, reason: 'simple-pattern' };
-  }
   return { model: SONNET, reason: 'default-sonnet' };
 }
 
