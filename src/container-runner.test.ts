@@ -64,6 +64,7 @@ vi.mock('./container-runtime.js', () => ({
 // Mock credential-proxy
 vi.mock('./credential-proxy.js', () => ({
   detectAuthMode: vi.fn().mockReturnValue('api-key'),
+  ensureFreshOAuthToken: vi.fn().mockReturnValue(undefined),
 }));
 
 // Mock watchdog — container-runner calls register/heartbeat/unregister
@@ -109,8 +110,10 @@ vi.mock('child_process', async () => {
 });
 
 import fs from 'fs';
+import { spawn } from 'child_process';
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { detectAuthMode, ensureFreshOAuthToken } from './credential-proxy.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -365,6 +368,77 @@ describe('agent-runner source sync', () => {
       expect.stringContaining('container/agent-runner/src'),
       expect.stringContaining('agent-runner-src'),
       expect.objectContaining({ force: true }),
+    );
+  });
+});
+
+describe('auth mode injection', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function capturedSpawnArgs(): string[] {
+    return vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[] ?? [];
+  }
+
+  async function runAndClose() {
+    const p = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    return p;
+  }
+
+  it('api-key mode passes ANTHROPIC_API_KEY env var', async () => {
+    vi.mocked(detectAuthMode).mockReturnValue('api-key');
+    // readEnvFile reads from the .env file; override via process.env which
+    // config.ts (not used here) reads, but also patch env directly since
+    // readEnvFile only reads files. We stub the env module for this test.
+    const envMod = await import('./env.js');
+    const spy = vi.spyOn(envMod, 'readEnvFile').mockImplementation((keys) => {
+      const out: Record<string, string> = {};
+      if (keys.includes('ANTHROPIC_API_KEY')) out['ANTHROPIC_API_KEY'] = 'sk-ant-test-key';
+      return out;
+    });
+
+    await runAndClose();
+
+    spy.mockRestore();
+    const args = capturedSpawnArgs();
+    const idx = args.indexOf('ANTHROPIC_API_KEY=sk-ant-test-key');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('-e');
+  });
+
+  it('oauth mode passes real CLAUDE_CODE_OAUTH_TOKEN env var', async () => {
+    vi.mocked(detectAuthMode).mockReturnValue('oauth');
+    vi.mocked(ensureFreshOAuthToken).mockReturnValue('sk-ant-oat01-real-token');
+
+    await runAndClose();
+
+    const args = capturedSpawnArgs();
+    const idx = args.indexOf('CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-real-token');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('-e');
+    // Must NOT set a proxy base URL for Claude API calls
+    expect(args.join(' ')).not.toContain('ANTHROPIC_BASE_URL=http');
+  });
+
+  it('oauth mode logs error when no token available', async () => {
+    vi.mocked(detectAuthMode).mockReturnValue('oauth');
+    vi.mocked(ensureFreshOAuthToken).mockReturnValue(undefined);
+
+    const { logger } = await import('./logger.js');
+    await runAndClose();
+
+    expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+      expect.stringContaining('no token available'),
     );
   });
 });

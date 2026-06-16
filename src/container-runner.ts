@@ -30,7 +30,7 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { detectAuthMode, ensureFreshOAuthToken } from './credential-proxy.js';
 import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -280,19 +280,22 @@ async function buildContainerArgs(
     `NANOCLAW_DAV_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__dav`,
   );
 
-  // Auth: pass the real API key directly so containers hit api.anthropic.com.
-  // The credential proxy is still used for DAV (iCloud) requests only.
+  // Auth: inject credentials directly so containers hit api.anthropic.com.
+  // The credential proxy is used for DAV (iCloud) requests only.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
     args.push('-e', `ANTHROPIC_API_KEY=${secrets.ANTHROPIC_API_KEY}`);
   } else {
-    // Legacy OAuth fallback — route through proxy
-    args.push(
-      '-e',
-      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-    );
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // OAuth mode: read (and refresh if near-expiry) the real access token from
+    // ~/.claude/.credentials.json and inject it directly into the container.
+    // The proxy-placeholder approach broke when the exchange endpoint returned 403.
+    const oauthToken = ensureFreshOAuthToken();
+    if (oauthToken) {
+      args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
+    } else {
+      logger.error('OAuth mode: no token available in ~/.claude/.credentials.json — containers will fail to authenticate');
+    }
   }
 
   // Runtime-specific args for host gateway resolution

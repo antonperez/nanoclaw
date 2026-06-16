@@ -15,6 +15,7 @@
 import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -146,7 +147,7 @@ function handleDavRequest(
  */
 let _oauthTokenCache: { token: string; expiresAt: number } | null = null;
 
-function readOAuthToken(envFileToken?: string): string | undefined {
+export function readOAuthToken(envFileToken?: string): string | undefined {
   // Explicit env override always wins (no caching needed, it's static)
   if (envFileToken) return envFileToken;
 
@@ -171,6 +172,92 @@ function readOAuthToken(envFileToken?: string): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Read the OAuth token, refreshing it first if it expires within 15 minutes.
+ *
+ * Refresh strategy (in order):
+ *   1. `claude auth status` — proactively refreshes tokens that are still
+ *      valid but near expiry. Fast, no token cost.
+ *   2. `claude --print . --max-turns 1` — forces a real API call that
+ *      triggers Claude Code's OAuth refresh flow. Used only when the token
+ *      is already expired and step 1 had no effect. Costs ~5 Haiku tokens.
+ *
+ * Called once per container spawn (not per request), so the extra latency
+ * is acceptable.
+ */
+export function ensureFreshOAuthToken(): string | undefined {
+  const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+  const REFRESH_AHEAD_MS = 15 * 60 * 1000; // refresh if < 15 min remaining
+
+  function readFromDisk(): { token?: string; expiresAt?: number } {
+    try {
+      const raw = fs.readFileSync(credPath, 'utf-8');
+      const creds = JSON.parse(raw) as Record<string, unknown>;
+      const oauth = creds.claudeAiOauth as Record<string, unknown> | undefined;
+      return {
+        token: oauth?.accessToken as string | undefined,
+        expiresAt: oauth?.expiresAt as number | undefined,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  const { token, expiresAt } = readFromDisk();
+  const now = Date.now();
+
+  if (token && expiresAt && expiresAt > now + REFRESH_AHEAD_MS) {
+    return token; // Fresh enough — use as-is
+  }
+
+  const remainingMin = expiresAt
+    ? ((expiresAt - now) / 60_000).toFixed(1)
+    : 'unknown';
+  logger.info(
+    { remainingMin },
+    'OAuth token near/past expiry — attempting refresh',
+  );
+
+  // Step 1: lightweight refresh (works when token is still valid)
+  try {
+    execFileSync('claude', ['auth', 'status'], {
+      timeout: 30_000,
+      stdio: 'ignore',
+    });
+  } catch { /* ignore */ }
+
+  const after = readFromDisk();
+  if (after.token && after.expiresAt && after.expiresAt > now + 60_000) {
+    logger.info('OAuth token refreshed via auth status');
+    _oauthTokenCache = null; // invalidate proxy cache
+    return after.token;
+  }
+
+  // Step 2: token still expired — force a real API call to trigger refresh
+  logger.warn(
+    'auth status did not refresh token — forcing refresh via API call (~5 Haiku tokens)',
+  );
+  try {
+    execFileSync(
+      'claude',
+      ['--print', '.', '--model', 'claude-haiku-4-5-20251001', '--max-turns', '1'],
+      { timeout: 60_000, stdio: 'ignore' },
+    );
+  } catch { /* ignore */ }
+
+  const final = readFromDisk();
+  _oauthTokenCache = null; // invalidate proxy cache regardless
+  if (final.token && final.expiresAt && final.expiresAt > now) {
+    logger.info(
+      { expiresIn: `${((final.expiresAt - now) / 60_000).toFixed(1)}m` },
+      'OAuth token refreshed via API call',
+    );
+  } else {
+    logger.error('OAuth token refresh failed — container may fail to authenticate');
+  }
+  return final.token;
 }
 
 export function startCredentialProxy(

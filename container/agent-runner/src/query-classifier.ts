@@ -3,7 +3,7 @@
  * Extracted for testability.
  */
 
-const SONNET = 'claude-sonnet-4-20250514';
+const SONNET = 'claude-sonnet-4-6';
 
 // Core tools always loaded
 const CORE_TOOLS = new Set([

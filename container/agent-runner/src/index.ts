@@ -218,8 +218,8 @@ async function runQuery(
   // Allow CLAUDE_MODEL env to override routing (e.g. force opus for testing)
   const envModel = process.env.CLAUDE_MODEL;
   const MODEL_ALIASES: Record<string, string> = {
-    sonnet: 'claude-sonnet-4-20250514',
-    opus: 'claude-opus-4-20250514',
+    sonnet: 'claude-sonnet-4-6',
+    opus: 'claude-opus-4-8',
     haiku: 'claude-haiku-4-5-20251001',
   };
   const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
