@@ -13,6 +13,7 @@ STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-health-state"
 RESTART_COUNT_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-restart-count"
 ALERT_COOLDOWN_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-alert-cooldown"
 SUSTAINED_FILE="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-error-sustained"
+IMAGE_BUILD_LOCK="${XDG_RUNTIME_DIR:-/tmp}/nanoclaw-image-build.lock"
 
 # Skip within 2 minutes of boot — pm2 may still be starting up
 UPTIME_SECONDS=$(awk '{print int($1)}' /proc/uptime)
@@ -66,6 +67,22 @@ nanoclaw was down at ${TIMESTAMP} — restarted successfully."
   else
     send_alert "🔴 *NanoClaw health check*
 nanoclaw was down at ${TIMESTAMP} — restart failed. Manual intervention needed."
+  fi
+fi
+
+# --- Docker image check ---
+# Catches the case where Docker was upgraded/reinstalled and wiped the image store.
+if ! docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -q "^nanoclaw-agent:latest$"; then
+  if [ ! -f "$IMAGE_BUILD_LOCK" ]; then
+    touch "$IMAGE_BUILD_LOCK"
+    send_alert "⚠️ *NanoClaw Docker image missing* (Pi4)
+nanoclaw-agent:latest not found at ${TIMESTAMP} — rebuilding in background..."
+    (
+      bash /home/anton/nanoclaw/container/build.sh >> /mnt/pi/nanoclaw/logs/container-build.log 2>&1 \
+        && send_alert "✅ *NanoClaw Docker image rebuilt* at $(date '+%Y-%m-%d %H:%M:%S')" \
+        || send_alert "🔴 *NanoClaw Docker image rebuild failed* at $(date '+%Y-%m-%d %H:%M:%S') — manual intervention needed."
+      rm -f "$IMAGE_BUILD_LOCK"
+    ) &
   fi
 fi
 
