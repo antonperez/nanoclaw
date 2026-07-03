@@ -43,9 +43,9 @@ export interface DirectQueryResult {
 
 // --- Cost calculation (kept for token logging compatibility) ---
 
-const SONNET_PRICING = { input: 3.0,  output: 15.0, cache_read: 0.3,  cache_creation: 3.75  };
-const OPUS_PRICING   = { input: 15.0, output: 75.0, cache_read: 1.5,  cache_creation: 18.75 };
-const HAIKU_PRICING  = { input: 0.8,  output: 4.0,  cache_read: 0.08, cache_creation: 1.0   };
+const SONNET_PRICING = { input: 3.0, output: 15.0, cache_read: 0.30, cache_creation: 3.75 };
+const OPUS_PRICING   = { input: 5.0, output: 25.0, cache_read: 0.50, cache_creation: 6.25 };
+const HAIKU_PRICING  = { input: 1.0, output:  5.0, cache_read: 0.10, cache_creation: 1.25 };
 
 function getPricing(model: string) {
   if (model.includes('opus'))  return OPUS_PRICING;
