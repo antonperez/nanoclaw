@@ -44,16 +44,26 @@ describe('classifyQuery', () => {
     expect(result.reason).toBe('r-prefix');
   });
 
-  it('routes general prompts to opus by default', () => {
+  it('routes general prompts to sonnet by default', () => {
     const result = classifyQuery('what are the odds sinner wins wimbledon?', false);
-    expect(result.model).toContain('opus');
-    expect(result.reason).toBe('default-opus');
+    expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('default-sonnet');
   });
 
-  it('routes strategy questions to opus', () => {
-    const result = classifyQuery('second-order think this BDO succession situation', false);
+  it('routes o: prefix to opus', () => {
+    const result = classifyQuery('o: second-order think this BDO situation', false);
     expect(result.model).toContain('opus');
-    expect(result.reason).toBe('default-opus');
+    expect(result.reason).toBe('o-prefix');
+  });
+
+  it('o: prefix is case-insensitive', () => {
+    const result = classifyQuery('O: analyse this', false);
+    expect(result.reason).toBe('o-prefix');
+  });
+
+  it('scheduled task takes precedence over o: prefix', () => {
+    const result = classifyQuery('o: daily brief', true);
+    expect(result.reason).toBe('scheduled-task');
   });
 
   it('scheduled task takes precedence over q: prefix', () => {

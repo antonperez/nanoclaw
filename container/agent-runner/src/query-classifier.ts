@@ -6,8 +6,10 @@
 const SONNET = 'claude-sonnet-4-6';
 const OPUS = 'claude-opus-4-8';
 
-// q: prefix — user-controlled Sonnet override for any message type
-// (quick queries, ingest, source, note, wiki ops, etc.)
+// o: prefix — user-controlled Opus override
+const O_PREFIX = /^\s*o:/i;
+
+// q: prefix — kept for backwards compat; now a no-op since Sonnet is default
 const Q_PREFIX = /^\s*q:/i;
 
 // r: prefix — explicit memory write. Strips prefix, tells Andy to persist the fact.
@@ -35,16 +37,17 @@ const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
 
 /**
  * Classify a query to select the model.
- * Opus is the default; Sonnet is used for structured/mechanical tasks.
+ * Sonnet is the default; use o: prefix to force Opus.
  */
 export function classifyQuery(
   prompt: string,
   isScheduledTask: boolean,
 ): { model: string; reason: string } {
   if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
+  if (O_PREFIX.test(prompt)) return { model: OPUS, reason: 'o-prefix' };
   if (Q_PREFIX.test(prompt)) return { model: SONNET, reason: 'q-prefix' };
   if (R_PREFIX.test(prompt)) return { model: SONNET, reason: 'r-prefix' };
-  return { model: OPUS, reason: 'default-opus' };
+  return { model: SONNET, reason: 'default-sonnet' };
 }
 
 /** Returns true when the prompt starts with r:/remember: prefix. */
