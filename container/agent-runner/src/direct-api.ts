@@ -20,6 +20,7 @@ export interface DirectQueryOptions {
   mcpServerEnv: Record<string, string>;
   maxTurns: number;
   model: string;
+  allowedTools?: string[];     // Restrict Claude to these tools (omit = all tools)
   timeoutMs?: number;          // Kill CLI if it hasn't exited (default 8 min)
   log: (msg: string) => void;
 }
@@ -116,6 +117,10 @@ export async function directQuery(
 
   if (options.sessionId) {
     args.push('--resume', options.sessionId);
+  }
+
+  if (options.allowedTools && options.allowedTools.length > 0) {
+    args.push('--allowedTools', options.allowedTools.join(','));
   }
 
   args.push(options.prompt);

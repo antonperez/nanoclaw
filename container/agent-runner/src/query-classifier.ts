@@ -58,17 +58,17 @@ export function stripRPrefix(prompt: string): string {
 }
 
 /**
- * Build a tool filter based on prompt content.
+ * Return the allowed tool names for a query.
  * Always includes core tools; adds specialized tools only when keywords match.
  * When routingReason is 'simple-pattern', only send_message is loaded.
  */
-export function buildToolFilter(
+export function getAllowedTools(
   prompt: string,
   isMain: boolean,
   routingReason?: string,
-): (tool: { name: string }) => boolean {
+): string[] {
   if (routingReason === 'simple-pattern') {
-    return (tool) => tool.name === 'mcp__nanoclaw__send_message';
+    return ['mcp__nanoclaw__send_message'];
   }
   const allowed = new Set(CORE_TOOLS);
   for (const { pattern, tools } of TOOL_TRIGGERS) {
@@ -77,5 +77,18 @@ export function buildToolFilter(
     }
   }
   if (!isMain) allowed.delete('mcp__nanoclaw__register_group');
+  return [...allowed];
+}
+
+/**
+ * Build a tool filter based on prompt content.
+ * Delegates to getAllowedTools — kept for test compatibility.
+ */
+export function buildToolFilter(
+  prompt: string,
+  isMain: boolean,
+  routingReason?: string,
+): (tool: { name: string }) => boolean {
+  const allowed = new Set(getAllowedTools(prompt, isMain, routingReason));
   return (tool) => allowed.has(tool.name);
 }

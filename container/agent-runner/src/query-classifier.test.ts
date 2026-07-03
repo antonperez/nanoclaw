@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyQuery, buildToolFilter, isRPrefix, stripRPrefix } from './query-classifier.js';
+import { classifyQuery, buildToolFilter, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 // --- classifyQuery ---
 
@@ -94,6 +94,49 @@ describe('isRPrefix', () => {
   it('returns true for remember with space', () => { expect(isRPrefix('remember this')).toBe(true); });
   it('returns false for regular message', () => { expect(isRPrefix('what is the weather?')).toBe(false); });
   it('returns false for q: prefix', () => { expect(isRPrefix('q: quick question')).toBe(false); });
+});
+
+// --- getAllowedTools ---
+
+describe('getAllowedTools', () => {
+  it('returns core 5 tools for a simple prompt', () => {
+    const tools = getAllowedTools('hello', true);
+    expect(tools).toHaveLength(5);
+    expect(tools).toContain('bash');
+    expect(tools).toContain('read_file');
+    expect(tools).toContain('write_file');
+    expect(tools).toContain('mcp__nanoclaw__send_message');
+    expect(tools).toContain('mcp__nanoclaw__web_fetch');
+  });
+
+  it('adds manage_tasks for scheduling keywords', () => {
+    const tools = getAllowedTools('schedule a reminder for tomorrow', true);
+    expect(tools).toContain('mcp__nanoclaw__manage_tasks');
+  });
+
+  it('adds send_email for email keywords', () => {
+    const tools = getAllowedTools('send an email to john', true);
+    expect(tools).toContain('mcp__nanoclaw__send_email');
+  });
+
+  it('adds dav_request for calendar keywords', () => {
+    const tools = getAllowedTools('check my calendar events', true);
+    expect(tools).toContain('mcp__nanoclaw__dav_request');
+  });
+
+  it('excludes register_group when not main', () => {
+    const tools = getAllowedTools('register a new group', false);
+    expect(tools).not.toContain('mcp__nanoclaw__register_group');
+  });
+
+  it('returns only send_message for simple-pattern routing', () => {
+    const tools = getAllowedTools('hi', true, 'simple-pattern');
+    expect(tools).toEqual(['mcp__nanoclaw__send_message']);
+  });
+
+  it('returns an array not a Set', () => {
+    expect(Array.isArray(getAllowedTools('hello', true))).toBe(true);
+  });
 });
 
 // --- buildToolFilter ---

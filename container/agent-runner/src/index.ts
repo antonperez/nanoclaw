@@ -18,7 +18,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { directQuery, QUERY_TIMEOUT_SENTINEL } from './direct-api.js';
-import { classifyQuery, isRPrefix, stripRPrefix } from './query-classifier.js';
+import { classifyQuery, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 interface ContainerInput {
   prompt: string;
@@ -225,6 +225,10 @@ async function runQuery(
   const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
   log(`Model routing: ${model} (reason: ${envModel ? 'env-override' : routing.reason})`);
 
+  const isMain = containerInput.isMain ?? false;
+  const allowedTools = getAllowedTools(prompt, isMain, routing.reason);
+  log(`Tool filter: ${allowedTools.length} tools [${allowedTools.join(', ')}]`);
+
   const isScheduled = containerInput.isScheduledTask ?? false;
 
   const result = await directQuery({
@@ -240,6 +244,7 @@ async function runQuery(
     },
     maxTurns: isScheduled ? 8 : 15,
     model,
+    allowedTools,
     log,
   });
 
