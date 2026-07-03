@@ -18,13 +18,9 @@ Prefix triggers fire only when the keyword is the **first word** (case-insensiti
 
 | Condition | Model | Examples |
 |-----------|-------|---------|
-| `q:` prefix | Sonnet | `q: is wimbledon on?` |
-| `ingest` / `source` anywhere | Sonnet | `source this`, `ingest https://...` |
-| `wiki ingest` / `add to wiki` | Sonnet | `/wiki ingest` |
-| `/wiki query` / `/wiki lint` / `search the wiki` | Sonnet | `/wiki query transformers` |
-| `save this` / `note this` / `remember this` / `add to notes` | Sonnet | `remember this for later` |
+| `q:` prefix | Sonnet | `q: is wimbledon on?`, `q: source this`, `q: note this` |
 | Scheduled / cron task | Sonnet | *(automatic)* |
-| *(everything else)* | **Opus 4.8** | open questions, planning, analysis |
+| *(everything else)* | **Opus 4.8** | questions, strategy, ingest, analysis |
 
 ## Configuration (.env)
 
