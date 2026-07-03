@@ -6,16 +6,9 @@
 const SONNET = 'claude-sonnet-4-6';
 const OPUS = 'claude-opus-4-8';
 
-const SONNET_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  // Explicit quick/cheap prefix — user-controlled Sonnet override
-  { pattern: /^\s*q:/i, reason: 'q-prefix' },
-  // Wiki ingest / source — structured content extraction and page writing
-  { pattern: /\b(ingest|source)\b|wiki\s+ingest|add\s+to\s+wiki/i, reason: 'wiki-ingest' },
-  // Wiki operations — reading and citing known content
-  { pattern: /\/wiki\s+(query|lint|search)|search\s+the\s+wiki/i, reason: 'wiki-op' },
-  // Save / note — mechanical write operations
-  { pattern: /\b(add\s+to\s+notes?|save\s+this|note\s+this|remember\s+this|jot\s+this)\b/i, reason: 'save-note' },
-];
+// q: prefix — user-controlled Sonnet override for any message type
+// (quick queries, ingest, source, note, wiki ops, etc.)
+const Q_PREFIX = /^\s*q:/i;
 
 // Core tools always loaded
 const CORE_TOOLS = new Set([
@@ -45,9 +38,7 @@ export function classifyQuery(
   isScheduledTask: boolean,
 ): { model: string; reason: string } {
   if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
-  for (const { pattern, reason } of SONNET_PATTERNS) {
-    if (pattern.test(prompt)) return { model: SONNET, reason };
-  }
+  if (Q_PREFIX.test(prompt)) return { model: SONNET, reason: 'q-prefix' };
   return { model: OPUS, reason: 'default-opus' };
 }
 
