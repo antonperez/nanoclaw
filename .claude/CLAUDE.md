@@ -19,6 +19,7 @@ Prefix triggers fire only when the keyword is the **first word** (case-insensiti
 | Condition | Model | Examples |
 |-----------|-------|---------|
 | `q:` prefix | Sonnet | `q: is wimbledon on?`, `q: source this`, `q: note this` |
+| `r:` / `remember:` prefix | Sonnet | `r: udemy access via BDO`, `remember: therapy next week` |
 | Scheduled / cron task | Sonnet | *(automatic)* |
 | *(everything else)* | **Opus 4.8** | questions, strategy, ingest, analysis |
 
