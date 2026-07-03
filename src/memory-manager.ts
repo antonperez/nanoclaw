@@ -8,9 +8,10 @@ import {
 import { escapeXml } from './router.js';
 
 // Maximum characters stored per hot event (keeps storage lean)
-const HOT_EVENT_MAX_CHARS = 500;
-// Hours of hot events injected as recent context
-const HOT_CONTEXT_HOURS = 4;
+const HOT_EVENT_MAX_CHARS = 800;
+// Hours of hot events injected as recent context — covers a full workday so
+// morning messages are still visible by evening after a session rotation.
+const HOT_CONTEXT_HOURS = 8;
 // Days of warm summaries injected into context
 const WARM_CONTEXT_DAYS = 7;
 // Purge expired entries every N writes rather than on every write

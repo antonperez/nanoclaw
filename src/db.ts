@@ -684,6 +684,15 @@ export function deleteSession(groupFolder: string): void {
   db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
 }
 
+/** Return the .jsonl file size in bytes for a session, or -1 if not found. */
+export function getSessionFileSizeBytes(groupFolder: string, sessionId: string): number {
+  try {
+    return fs.statSync(sessionJsonlPath(groupFolder, sessionId)).size;
+  } catch {
+    return -1;
+  }
+}
+
 export function getRecentMessages(
   chatJid: string,
   botPrefix: string,

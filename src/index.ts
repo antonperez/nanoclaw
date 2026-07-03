@@ -35,6 +35,7 @@ import {
 } from './container-runtime.js';
 import {
   deleteSession,
+  getSessionFileSizeBytes,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -421,6 +422,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 // Sessions older than this are rotated (fresh session started, stale .jsonl archived).
 // 12 hours: keeps intra-day continuity while preventing context from ballooning overnight.
 const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+// Sessions larger than this are rotated regardless of age. Each resumed session resends
+// its full history; 1MB (~40-50 exchanges) keeps per-query input tokens manageable.
+const SESSION_MAX_SIZE_BYTES = 1 * 1024 * 1024;
 
 async function runAgent(
   group: RegisteredGroup,
@@ -430,15 +434,18 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
 
-  // Rotate stale sessions before use. A session older than SESSION_MAX_AGE_MS is
-  // dropped so the next query starts fresh. Each turn of a resumed session resends
-  // the full conversation history, so long-lived sessions compound token cost rapidly.
+  // Rotate stale sessions before use. A session older than SESSION_MAX_AGE_MS or
+  // larger than SESSION_MAX_SIZE_BYTES is dropped so the next query starts fresh.
+  // Each turn of a resumed session resends the full conversation history, so
+  // long-lived or large sessions compound token cost rapidly.
   const existingSessionId = sessions[group.folder];
   if (existingSessionId) {
     const createdAt = getSessionCreatedAt(group.folder);
     const ageMs = createdAt
       ? Date.now() - new Date(createdAt).getTime()
       : Infinity;
+    const sizeBytes = getSessionFileSizeBytes(group.folder, existingSessionId);
+
     if (ageMs > SESSION_MAX_AGE_MS) {
       logger.info(
         {
@@ -447,6 +454,17 @@ async function runAgent(
           ageHours: (ageMs / 3600000).toFixed(1),
         },
         'Rotating stale session (age exceeded 12h)',
+      );
+      deleteSession(group.folder);
+      delete sessions[group.folder];
+    } else if (sizeBytes >= SESSION_MAX_SIZE_BYTES) {
+      logger.info(
+        {
+          group: group.name,
+          sessionId: existingSessionId,
+          sizeMB: (sizeBytes / 1024 / 1024).toFixed(1),
+        },
+        'Rotating large session (size exceeded 1MB)',
       );
       deleteSession(group.folder);
       delete sessions[group.folder];
