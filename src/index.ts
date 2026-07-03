@@ -465,7 +465,7 @@ async function runAgent(
           sessionId: existingSessionId,
           sizeMB: (sizeBytes / 1024 / 1024).toFixed(1),
         },
-        'Rotating large session (size exceeded 1MB)',
+        'Rotating large session (size exceeded 3MB)',
       );
       deleteSession(group.folder);
       delete sessions[group.folder];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyQuery, buildToolFilter, stripRPrefix } from './query-classifier.js';
+import { classifyQuery, buildToolFilter, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 // --- classifyQuery ---
 
@@ -84,6 +84,16 @@ describe('stripRPrefix', () => {
   it('strips leading whitespace before prefix', () => {
     expect(stripRPrefix('  r: indented')).toBe('indented');
   });
+});
+
+// --- isRPrefix ---
+
+describe('isRPrefix', () => {
+  it('returns true for r: prefix', () => { expect(isRPrefix('r: fact')).toBe(true); });
+  it('returns true for remember: prefix', () => { expect(isRPrefix('remember: fact')).toBe(true); });
+  it('returns true for remember with space', () => { expect(isRPrefix('remember this')).toBe(true); });
+  it('returns false for regular message', () => { expect(isRPrefix('what is the weather?')).toBe(false); });
+  it('returns false for q: prefix', () => { expect(isRPrefix('q: quick question')).toBe(false); });
 });
 
 // --- buildToolFilter ---

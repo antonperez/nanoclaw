@@ -47,6 +47,11 @@ export function classifyQuery(
   return { model: OPUS, reason: 'default-opus' };
 }
 
+/** Returns true when the prompt starts with r:/remember: prefix. */
+export function isRPrefix(prompt: string): boolean {
+  return R_PREFIX.test(prompt);
+}
+
 /** Strip the r:/remember: prefix and return the bare content. */
 export function stripRPrefix(prompt: string): string {
   return prompt.replace(R_PREFIX, '').trim();
