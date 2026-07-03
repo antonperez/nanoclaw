@@ -3,26 +3,28 @@
 NanoClaw routes messages between Claude containers (default), Gemini, DeepSeek, and a local Ollama model.
 The routing logic lives in `src/model-router.ts` and runs in the host process before any container is spawned.
 
-## Default: Claude Sonnet (container agent)
+## Layer 1 — Backend routing (host process, `src/model-router.ts`)
 
-All messages go to Claude Sonnet by default, via the container agent runner. Uses the Claude Max Agent SDK credit pool ($100/month). No per-token billing.
+Prefix triggers fire only when the keyword is the **first word** (case-insensitive). Mid-sentence mentions stay on Claude.
 
-## Triggers — all prefix-only
+| Prefix | Backend |
+|--------|---------|
+| `gem`, `gemini` | Gemini 2.5 Flash |
+| `ds`, `deepseek` | DeepSeek |
+| `vault`, `ollama` | Local Ollama |
+| *(anything else)* | Claude container (default) |
 
-A trigger only fires when the keyword is the **first word** of the message (case-insensitive, leading whitespace tolerated). Mid-sentence mentions stay on the default Claude path.
+## Layer 2 — Claude model routing (inside container, `container/agent-runner/src/query-classifier.ts`)
 
-| Backend | Triggers | Example |
-|---------|----------|---------|
-| **Gemini** (explicit override) | `gem`, `gemini` | "gem summarize this" |
-| **DeepSeek** | `ds`, `deepseek` | "ds write a sorting algorithm" |
-| **Ollama** (local Pi) | `vault`, `ollama` | "vault, what's 2+2?" |
-| **Claude container** (default, no trigger needed) | — | any message |
-
-What this means in practice:
-- ✓ Any message → Claude Sonnet (default)
-- ✓ `gem summarize this` → Gemini (explicit)
-- ✗ `compare claude.ai vs gemini` → **Claude** (no prefix trigger)
-- ✗ `let's use ollama locally` → **Claude**
+| Condition | Model | Examples |
+|-----------|-------|---------|
+| `q:` prefix | Sonnet | `q: is wimbledon on?` |
+| `ingest` / `source` anywhere | Sonnet | `source this`, `ingest https://...` |
+| `wiki ingest` / `add to wiki` | Sonnet | `/wiki ingest` |
+| `/wiki query` / `/wiki lint` / `search the wiki` | Sonnet | `/wiki query transformers` |
+| `save this` / `note this` / `remember this` / `add to notes` | Sonnet | `remember this for later` |
+| Scheduled / cron task | Sonnet | *(automatic)* |
+| *(everything else)* | **Opus 4.8** | open questions, planning, analysis |
 
 ## Configuration (.env)
 
