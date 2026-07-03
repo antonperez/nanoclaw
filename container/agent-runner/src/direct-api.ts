@@ -20,8 +20,11 @@ export interface DirectQueryOptions {
   mcpServerEnv: Record<string, string>;
   maxTurns: number;
   model: string;
+  timeoutMs?: number;          // Kill CLI if it hasn't exited (default 8 min)
   log: (msg: string) => void;
 }
+
+export const QUERY_TIMEOUT_SENTINEL = '__QUERY_TIMEOUT__';
 
 export interface DirectQueryResult {
   text: string | null;
@@ -119,6 +122,8 @@ export async function directQuery(
 
   log(`Claude CLI: model=${options.model} session=${options.sessionId ?? 'new'} turns≤${options.maxTurns}`);
 
+  const queryTimeoutMs = options.timeoutMs ?? 8 * 60_000; // 8 minutes default
+
   return new Promise((resolve) => {
     const proc = spawn('claude', args, {
       env: { ...process.env },
@@ -136,6 +141,13 @@ export async function directQuery(
     let turns = 0;
     let cliSessionId: string | undefined;
     let lineBuffer = '';
+    let timedOut = false;
+
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      log(`Claude CLI timeout after ${queryTimeoutMs}ms — killing process`);
+      proc.kill('SIGKILL');
+    }, queryTimeoutMs);
 
     proc.stdout.on('data', (chunk: Buffer) => {
       lineBuffer += chunk.toString();
@@ -177,8 +189,15 @@ export async function directQuery(
     });
 
     proc.on('close', (code) => {
+      clearTimeout(killTimer);
       try { fs.unlinkSync(mcpConfigPath);    } catch { /* ignore */ }
       try { fs.unlinkSync(systemPromptPath); } catch { /* ignore */ }
+
+      if (timedOut) {
+        log(`Claude CLI killed after ${queryTimeoutMs}ms timeout`);
+        resolve({ text: QUERY_TIMEOUT_SENTINEL, usage: totalUsage, costUsd: 0, turns: 0 });
+        return;
+      }
 
       if (code !== 0 && !resultText) {
         log(`Claude CLI exited ${code} with no result`);
@@ -194,6 +213,7 @@ export async function directQuery(
     });
 
     proc.on('error', (err: Error) => {
+      clearTimeout(killTimer);
       try { fs.unlinkSync(mcpConfigPath);    } catch { /* ignore */ }
       try { fs.unlinkSync(systemPromptPath); } catch { /* ignore */ }
       log(`Claude CLI spawn error: ${err.message}`);

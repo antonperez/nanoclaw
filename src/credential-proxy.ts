@@ -226,7 +226,9 @@ export function ensureFreshOAuthToken(): string | undefined {
       timeout: 30_000,
       stdio: 'ignore',
     });
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const after = readFromDisk();
   if (after.token && after.expiresAt && after.expiresAt > now + 60_000) {
@@ -242,10 +244,19 @@ export function ensureFreshOAuthToken(): string | undefined {
   try {
     execFileSync(
       'claude',
-      ['--print', '.', '--model', 'claude-haiku-4-5-20251001', '--max-turns', '1'],
+      [
+        '--print',
+        '.',
+        '--model',
+        'claude-haiku-4-5-20251001',
+        '--max-turns',
+        '1',
+      ],
       { timeout: 60_000, stdio: 'ignore' },
     );
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const final = readFromDisk();
   _oauthTokenCache = null; // invalidate proxy cache regardless
@@ -255,7 +266,9 @@ export function ensureFreshOAuthToken(): string | undefined {
       'OAuth token refreshed via API call',
     );
   } else {
-    logger.error('OAuth token refresh failed — container may fail to authenticate');
+    logger.error(
+      'OAuth token refresh failed — container may fail to authenticate',
+    );
   }
   return final.token;
 }

@@ -383,11 +383,16 @@ describe('auth mode injection', () => {
   });
 
   function capturedSpawnArgs(): string[] {
-    return vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[] ?? [];
+    return (vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[]) ?? [];
   }
 
   async function runAndClose() {
-    const p = runContainerAgent(testGroup, testInput, () => {}, vi.fn(async () => {}));
+    const p = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
     emitOutputMarker(fakeProc, { status: 'success', result: 'ok' });
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -403,7 +408,8 @@ describe('auth mode injection', () => {
     const envMod = await import('./env.js');
     const spy = vi.spyOn(envMod, 'readEnvFile').mockImplementation((keys) => {
       const out: Record<string, string> = {};
-      if (keys.includes('ANTHROPIC_API_KEY')) out['ANTHROPIC_API_KEY'] = 'sk-ant-test-key';
+      if (keys.includes('ANTHROPIC_API_KEY'))
+        out['ANTHROPIC_API_KEY'] = 'sk-ant-test-key';
       return out;
     });
 

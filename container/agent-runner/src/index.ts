@@ -17,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
-import { directQuery } from './direct-api.js';
+import { directQuery, QUERY_TIMEOUT_SENTINEL } from './direct-api.js';
 import { classifyQuery } from './query-classifier.js';
 
 interface ContainerInput {
@@ -253,6 +253,21 @@ async function runQuery(
     result.usage.cache_creation_input_tokens,
     result.costUsd,
   );
+
+  // Detect CLI hang — process was killed by the per-query timeout
+  if (result.text === QUERY_TIMEOUT_SENTINEL) {
+    log('Claude CLI timed out — exiting for host to retry with a fresh container');
+    throw new Error('QUERY_TIMEOUT: Claude CLI did not respond within the time limit');
+  }
+
+  // Detect OAuth token expiry (401) before emitting any result.
+  // When the injected token expires inside a long-running container, the CLI
+  // returns a 401 error text with zero cost. Exit immediately so the host
+  // spawns a fresh container with a new token on the next message.
+  if (result.costUsd === 0 && result.text?.includes('API Error: 401')) {
+    log('Auth failure (401) — token expired in long-running container, exiting for respawn');
+    throw new Error('AUTH_FAILURE_401: OAuth token expired');
+  }
 
   // Emit result
   writeOutput({

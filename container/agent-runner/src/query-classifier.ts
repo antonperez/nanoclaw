@@ -3,7 +3,7 @@
  * Extracted for testability.
  */
 
-const SONNET = 'claude-sonnet-4-6';
+const OPUS = 'claude-opus-4-8';
 
 // Core tools always loaded
 const CORE_TOOLS = new Set([
@@ -31,7 +31,7 @@ export function classifyQuery(
   _prompt: string,
   _isScheduledTask: boolean,
 ): { model: string; reason: string } {
-  return { model: SONNET, reason: 'default-sonnet' };
+  return { model: OPUS, reason: 'default-opus' };
 }
 
 /**

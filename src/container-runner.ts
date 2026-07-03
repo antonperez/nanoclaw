@@ -294,7 +294,9 @@ async function buildContainerArgs(
     if (oauthToken) {
       args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
     } else {
-      logger.error('OAuth mode: no token available in ~/.claude/.credentials.json — containers will fail to authenticate');
+      logger.error(
+        'OAuth mode: no token available in ~/.claude/.credentials.json — containers will fail to authenticate',
+      );
     }
   }
 
