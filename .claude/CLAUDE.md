@@ -21,7 +21,7 @@ Prefix triggers fire only when the keyword is the **first word** (case-insensiti
 | `o:` prefix | Opus 4.8 | `o: second-order think this`, `o: analyse the situation` |
 | `r:` / `remember:` prefix | Sonnet | `r: udemy access via BDO`, `remember: therapy next week` |
 | Scheduled / cron task | Sonnet | *(automatic)* |
-| *(everything else)* | **Sonnet** | questions, ingest, analysis, general chat |
+| *(everything else)* | **Sonnet 5** | questions, ingest, analysis, general chat |
 
 ## Configuration (.env)
 

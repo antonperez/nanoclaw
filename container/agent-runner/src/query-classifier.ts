@@ -3,7 +3,7 @@
  * Extracted for testability.
  */
 
-const SONNET = 'claude-sonnet-4-6';
+const SONNET = 'claude-sonnet-5';
 const OPUS = 'claude-opus-4-8';
 
 // o: prefix — user-controlled Opus override
