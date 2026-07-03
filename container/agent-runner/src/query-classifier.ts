@@ -14,9 +14,9 @@ const Q_PREFIX = /^\s*q:/i;
 // Accepts: "r:", "r :", "remember:", "remember "
 const R_PREFIX = /^\s*r(?:emember)?[: ]/i;
 
-// Core tools always loaded
+// Core tools always loaded. Built-in Claude CLI tool names are PascalCase (Bash, Read, Write).
 const CORE_TOOLS = new Set([
-  'bash', 'read_file', 'write_file',
+  'Bash', 'Read', 'Write',
   'mcp__nanoclaw__send_message', 'mcp__nanoclaw__web_fetch',
 ]);
 

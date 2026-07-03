@@ -102,9 +102,9 @@ describe('getAllowedTools', () => {
   it('returns core 5 tools for a simple prompt', () => {
     const tools = getAllowedTools('hello', true);
     expect(tools).toHaveLength(5);
-    expect(tools).toContain('bash');
-    expect(tools).toContain('read_file');
-    expect(tools).toContain('write_file');
+    expect(tools).toContain('Bash');
+    expect(tools).toContain('Read');
+    expect(tools).toContain('Write');
     expect(tools).toContain('mcp__nanoclaw__send_message');
     expect(tools).toContain('mcp__nanoclaw__web_fetch');
   });
@@ -143,7 +143,7 @@ describe('getAllowedTools', () => {
 
 describe('buildToolFilter', () => {
   const allTools = [
-    'bash', 'read_file', 'write_file',
+    'Bash', 'Read', 'Write',
     'mcp__nanoclaw__send_message', 'mcp__nanoclaw__web_fetch',
     'mcp__nanoclaw__manage_tasks',
     'mcp__nanoclaw__send_email', 'mcp__nanoclaw__dav_request',
@@ -157,9 +157,9 @@ describe('buildToolFilter', () => {
 
   it('always includes core tools', () => {
     const names = filterNames('hello');
-    expect(names).toContain('bash');
-    expect(names).toContain('read_file');
-    expect(names).toContain('write_file');
+    expect(names).toContain('Bash');
+    expect(names).toContain('Read');
+    expect(names).toContain('Write');
     expect(names).toContain('mcp__nanoclaw__send_message');
     expect(names).toContain('mcp__nanoclaw__web_fetch');
   });
@@ -217,11 +217,11 @@ describe('buildToolFilter', () => {
     expect(names).toHaveLength(1);
   });
 
-  it('minimal mode: does not include bash, read_file, web_fetch', () => {
+  it('minimal mode: does not include Bash, Read, Write, web_fetch', () => {
     const names = filterNames('thanks', true, 'simple-pattern');
-    expect(names).not.toContain('bash');
-    expect(names).not.toContain('read_file');
-    expect(names).not.toContain('write_file');
+    expect(names).not.toContain('Bash');
+    expect(names).not.toContain('Read');
+    expect(names).not.toContain('Write');
     expect(names).not.toContain('mcp__nanoclaw__web_fetch');
   });
 
