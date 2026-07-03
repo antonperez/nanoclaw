@@ -77,7 +77,13 @@ function resolveAttachments(
       } catch {
         return []; // silently drop paths that escape the group directory
       }
-      return [{ filename: path.basename(p), path: hostPath, contentType: mimeForPath(p) }];
+      return [
+        {
+          filename: path.basename(p),
+          path: hostPath,
+          contentType: mimeForPath(p),
+        },
+      ];
     })
     .filter((a) => fs.existsSync(a.path));
 }

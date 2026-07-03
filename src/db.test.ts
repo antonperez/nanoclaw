@@ -727,10 +727,17 @@ describe('getRecentMessages', () => {
 
 describe('getSessionFileSizeBytes', () => {
   it('returns -1 when the session file does not exist', () => {
-    expect(getSessionFileSizeBytes('nonexistent-group', 'fake-session-id')).toBe(-1);
+    expect(
+      getSessionFileSizeBytes('nonexistent-group', 'fake-session-id'),
+    ).toBe(-1);
   });
 
   it('returns -1 for a real group folder with a non-existent session id', () => {
-    expect(getSessionFileSizeBytes('telegram_main', '00000000-0000-0000-0000-000000000000')).toBe(-1);
+    expect(
+      getSessionFileSizeBytes(
+        'telegram_main',
+        '00000000-0000-0000-0000-000000000000',
+      ),
+    ).toBe(-1);
   });
 });
