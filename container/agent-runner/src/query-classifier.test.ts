@@ -10,17 +10,6 @@ describe('classifyQuery', () => {
     expect(result.reason).toBe('scheduled-task');
   });
 
-  it('routes q: prefix to sonnet', () => {
-    const result = classifyQuery('q: is wimbledon on?', false);
-    expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('q-prefix');
-  });
-
-  it('q: prefix is case-insensitive', () => {
-    const result = classifyQuery('Q: quick question', false);
-    expect(result.reason).toBe('q-prefix');
-  });
-
   it('routes r: prefix to sonnet', () => {
     const result = classifyQuery('r: udemy access via BDO', false);
     expect(result.model).toContain('sonnet');
@@ -66,10 +55,6 @@ describe('classifyQuery', () => {
     expect(result.reason).toBe('scheduled-task');
   });
 
-  it('scheduled task takes precedence over q: prefix', () => {
-    const result = classifyQuery('q: daily brief', true);
-    expect(result.reason).toBe('scheduled-task');
-  });
 });
 
 // --- stripRPrefix ---

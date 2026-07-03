@@ -9,9 +9,6 @@ const OPUS = 'claude-opus-4-8';
 // o: prefix — user-controlled Opus override
 const O_PREFIX = /^\s*o:/i;
 
-// q: prefix — kept for backwards compat; now a no-op since Sonnet is default
-const Q_PREFIX = /^\s*q:/i;
-
 // r: prefix — explicit memory write. Strips prefix, tells Andy to persist the fact.
 // Accepts: "r:", "r :", "remember:", "remember "
 const R_PREFIX = /^\s*r(?:emember)?[: ]/i;
@@ -45,7 +42,6 @@ export function classifyQuery(
 ): { model: string; reason: string } {
   if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
   if (O_PREFIX.test(prompt)) return { model: OPUS, reason: 'o-prefix' };
-  if (Q_PREFIX.test(prompt)) return { model: SONNET, reason: 'q-prefix' };
   if (R_PREFIX.test(prompt)) return { model: SONNET, reason: 'r-prefix' };
   return { model: SONNET, reason: 'default-sonnet' };
 }

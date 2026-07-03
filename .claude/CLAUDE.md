@@ -20,7 +20,6 @@ Prefix triggers fire only when the keyword is the **first word** (case-insensiti
 |-----------|-------|---------|
 | `o:` prefix | Opus 4.8 | `o: second-order think this`, `o: analyse the situation` |
 | `r:` / `remember:` prefix | Sonnet | `r: udemy access via BDO`, `remember: therapy next week` |
-| `q:` prefix | Sonnet | `q: is wimbledon on?`, `q: source this`, `q: note this` |
 | Scheduled / cron task | Sonnet | *(automatic)* |
 | *(everything else)* | **Sonnet** | questions, ingest, analysis, general chat |
 
