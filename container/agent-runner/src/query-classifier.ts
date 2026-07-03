@@ -3,7 +3,17 @@
  * Extracted for testability.
  */
 
+const SONNET = 'claude-sonnet-4-6';
 const OPUS = 'claude-opus-4-8';
+
+const SONNET_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  // Wiki ingest / source — structured content extraction and page writing
+  { pattern: /\b(ingest|source)\b|wiki\s+ingest|add\s+to\s+wiki/i, reason: 'wiki-ingest' },
+  // Wiki operations — reading and citing known content
+  { pattern: /\/wiki\s+(query|lint|search)|search\s+the\s+wiki/i, reason: 'wiki-op' },
+  // Save / note — mechanical write operations
+  { pattern: /\b(add\s+to\s+notes?|save\s+this|note\s+this|remember\s+this|jot\s+this)\b/i, reason: 'save-note' },
+];
 
 // Core tools always loaded
 const CORE_TOOLS = new Set([
@@ -25,12 +35,17 @@ const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
 ];
 
 /**
- * Classify a query to select the model. Sonnet is the default for all cases.
+ * Classify a query to select the model.
+ * Opus is the default; Sonnet is used for structured/mechanical tasks.
  */
 export function classifyQuery(
-  _prompt: string,
-  _isScheduledTask: boolean,
+  prompt: string,
+  isScheduledTask: boolean,
 ): { model: string; reason: string } {
+  if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
+  for (const { pattern, reason } of SONNET_PATTERNS) {
+    if (pattern.test(prompt)) return { model: SONNET, reason };
+  }
   return { model: OPUS, reason: 'default-opus' };
 }
 
