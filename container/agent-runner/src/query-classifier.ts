@@ -7,6 +7,8 @@ const SONNET = 'claude-sonnet-4-6';
 const OPUS = 'claude-opus-4-8';
 
 const SONNET_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  // Explicit quick/cheap prefix — user-controlled Sonnet override
+  { pattern: /^\s*q:/i, reason: 'q-prefix' },
   // Wiki ingest / source — structured content extraction and page writing
   { pattern: /\b(ingest|source)\b|wiki\s+ingest|add\s+to\s+wiki/i, reason: 'wiki-ingest' },
   // Wiki operations — reading and citing known content
