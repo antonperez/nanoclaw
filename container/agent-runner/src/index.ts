@@ -18,7 +18,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import { directQuery, QUERY_TIMEOUT_SENTINEL } from './direct-api.js';
-import { classifyQuery } from './query-classifier.js';
+import { classifyQuery, stripRPrefix } from './query-classifier.js';
 
 interface ContainerInput {
   prompt: string;
@@ -377,6 +377,14 @@ async function main(): Promise<void> {
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+  }
+
+  // r: / remember: prefix — strip prefix and prepend write-to-memory instruction.
+  // Append to /workspace/group/notes/memory.md (date-stamped bullet). Sonnet handles it.
+  const isRemember = /^\s*r(?:emember)?[: ]/i.test(prompt);
+  if (isRemember) {
+    const fact = stripRPrefix(prompt);
+    prompt = `Remember this — append it as a bullet to /workspace/group/notes/memory.md (create the file if it doesn't exist). Format each line as: \`- YYYY-MM-DD: <fact>\`. Use today's date. Write exactly this fact:\n\n${fact}\n\nAfter writing, reply with: ✓ Remembered.`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {

@@ -1,71 +1,88 @@
 import { describe, it, expect } from 'vitest';
-import { classifyQuery, buildToolFilter } from './query-classifier.js';
+import { classifyQuery, buildToolFilter, stripRPrefix } from './query-classifier.js';
 
 // --- classifyQuery ---
 
 describe('classifyQuery', () => {
-  it('routes scheduled tasks to haiku', () => {
+  it('routes scheduled tasks to sonnet', () => {
     const result = classifyQuery('Run the daily brief', true);
-    expect(result.model).toContain('haiku');
+    expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('scheduled-task');
   });
 
-  it('routes simple greetings to haiku', () => {
-    for (const greeting of ['hi', 'Hello', 'good morning', 'thanks', 'gm', 'ok']) {
-      const result = classifyQuery(greeting, false);
-      expect(result.model).toContain('haiku');
-      expect(result.reason).toBe('simple-pattern');
-    }
-  });
-
-  it('routes greeting with trailing punctuation to haiku', () => {
-    for (const greeting of ['hi!', 'thanks.', 'ok?', 'bye!']) {
-      const result = classifyQuery(greeting, false);
-      expect(result.model).toContain('haiku');
-      expect(result.reason).toBe('simple-pattern');
-    }
-  });
-
-  it('does not route greeting followed by a request to haiku', () => {
-    const result = classifyQuery('hi can you schedule a meeting', false);
+  it('routes q: prefix to sonnet', () => {
+    const result = classifyQuery('q: is wimbledon on?', false);
     expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
+    expect(result.reason).toBe('q-prefix');
   });
 
-  it('does not route greeting with extra words to haiku', () => {
-    for (const prompt of ['hello how are you', 'ok sounds good', 'thanks for the help']) {
-      const result = classifyQuery(prompt, false);
-      expect(result.model).toContain('sonnet');
-      expect(result.reason).toBe('default-sonnet');
-    }
+  it('q: prefix is case-insensitive', () => {
+    const result = classifyQuery('Q: quick question', false);
+    expect(result.reason).toBe('q-prefix');
   });
 
-  it('routes complex prompts to sonnet', () => {
-    const longPrompt = 'Please analyze the quarterly report and summarize the key findings for the team meeting. '.repeat(4);
-    const result = classifyQuery(longPrompt, false);
+  it('routes r: prefix to sonnet', () => {
+    const result = classifyQuery('r: udemy access via BDO', false);
     expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
+    expect(result.reason).toBe('r-prefix');
   });
 
-  it('routes prompt with tool keywords to sonnet', () => {
-    const result = classifyQuery('schedule a meeting for tomorrow at 3pm', false);
+  it('routes remember: prefix to sonnet', () => {
+    const result = classifyQuery('remember: therapy notes', false);
     expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
+    expect(result.reason).toBe('r-prefix');
   });
 
-  it('routes general questions to sonnet', () => {
-    const result = classifyQuery('what is the capital of France?', false);
+  it('routes remember with space prefix to sonnet', () => {
+    const result = classifyQuery('remember this important thing', false);
     expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
+    expect(result.reason).toBe('r-prefix');
   });
 
-  it('scheduled task overrides all other checks', () => {
-    const result = classifyQuery(
-      'Analyze my spending this month and create a summary report with charts',
-      true,
-    );
-    expect(result.model).toContain('haiku');
+  it('r: prefix is case-insensitive', () => {
+    const result = classifyQuery('R: BDO has udemy', false);
+    expect(result.reason).toBe('r-prefix');
+  });
+
+  it('routes general prompts to opus by default', () => {
+    const result = classifyQuery('what are the odds sinner wins wimbledon?', false);
+    expect(result.model).toContain('opus');
+    expect(result.reason).toBe('default-opus');
+  });
+
+  it('routes strategy questions to opus', () => {
+    const result = classifyQuery('second-order think this BDO succession situation', false);
+    expect(result.model).toContain('opus');
+    expect(result.reason).toBe('default-opus');
+  });
+
+  it('scheduled task takes precedence over q: prefix', () => {
+    const result = classifyQuery('q: daily brief', true);
     expect(result.reason).toBe('scheduled-task');
+  });
+});
+
+// --- stripRPrefix ---
+
+describe('stripRPrefix', () => {
+  it('strips r: prefix', () => {
+    expect(stripRPrefix('r: udemy access via BDO')).toBe('udemy access via BDO');
+  });
+
+  it('strips remember: prefix', () => {
+    expect(stripRPrefix('remember: therapy notes')).toBe('therapy notes');
+  });
+
+  it('strips remember with trailing space', () => {
+    expect(stripRPrefix('remember this')).toBe('this');
+  });
+
+  it('strips R: case-insensitively', () => {
+    expect(stripRPrefix('R: some fact')).toBe('some fact');
+  });
+
+  it('strips leading whitespace before prefix', () => {
+    expect(stripRPrefix('  r: indented')).toBe('indented');
   });
 });
 

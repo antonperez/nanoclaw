@@ -10,6 +10,10 @@ const OPUS = 'claude-opus-4-8';
 // (quick queries, ingest, source, note, wiki ops, etc.)
 const Q_PREFIX = /^\s*q:/i;
 
+// r: prefix — explicit memory write. Strips prefix, tells Andy to persist the fact.
+// Accepts: "r:", "r :", "remember:", "remember "
+const R_PREFIX = /^\s*r(?:emember)?[: ]/i;
+
 // Core tools always loaded
 const CORE_TOOLS = new Set([
   'bash', 'read_file', 'write_file',
@@ -39,7 +43,13 @@ export function classifyQuery(
 ): { model: string; reason: string } {
   if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
   if (Q_PREFIX.test(prompt)) return { model: SONNET, reason: 'q-prefix' };
+  if (R_PREFIX.test(prompt)) return { model: SONNET, reason: 'r-prefix' };
   return { model: OPUS, reason: 'default-opus' };
+}
+
+/** Strip the r:/remember: prefix and return the bare content. */
+export function stripRPrefix(prompt: string): string {
+  return prompt.replace(R_PREFIX, '').trim();
 }
 
 /**

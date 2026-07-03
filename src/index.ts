@@ -423,8 +423,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 // 12 hours: keeps intra-day continuity while preventing context from ballooning overnight.
 const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 // Sessions larger than this are rotated regardless of age. Each resumed session resends
-// its full history; 1MB (~40-50 exchanges) keeps per-query input tokens manageable.
-const SESSION_MAX_SIZE_BYTES = 1 * 1024 * 1024;
+// its full history; 3MB covers a typical meeting (~10 rapid exchanges with tool calls)
+// without mid-session rotation, while still preventing unbounded growth on heavy days.
+const SESSION_MAX_SIZE_BYTES = 3 * 1024 * 1024;
 
 async function runAgent(
   group: RegisteredGroup,
