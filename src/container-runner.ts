@@ -423,6 +423,16 @@ export async function runContainerAgent(
       // Stream-parse for output markers
       if (onOutput) {
         parseBuffer += chunk;
+        // Guard against OOM: if the container floods stdout with data that
+        // never forms valid markers, cap parseBuffer at the same limit as
+        // the stdout log variable so both are bounded.
+        if (parseBuffer.length > CONTAINER_MAX_OUTPUT_SIZE * 2) {
+          logger.warn(
+            { group: group.name, size: parseBuffer.length },
+            'parseBuffer exceeded size limit — clearing to prevent OOM',
+          );
+          parseBuffer = '';
+        }
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);

@@ -26,6 +26,7 @@ export interface DirectQueryOptions {
 }
 
 export const QUERY_TIMEOUT_SENTINEL = '__QUERY_TIMEOUT__';
+export const QUERY_CRASH_SENTINEL   = '__QUERY_CRASH__';
 
 export interface DirectQueryResult {
   text: string | null;
@@ -101,8 +102,15 @@ export async function directQuery(
   const mcpConfigPath    = path.join(os.tmpdir(), `nanoclaw-mcp-${tag}.json`);
   const systemPromptPath = path.join(os.tmpdir(), `nanoclaw-sys-${tag}.txt`);
 
-  fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
-  fs.writeFileSync(systemPromptPath, options.systemPrompt);
+  // Write temp files; clean up both if either write fails so credentials don't linger on disk.
+  try {
+    fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig));
+    fs.writeFileSync(systemPromptPath, options.systemPrompt);
+  } catch (err) {
+    try { fs.unlinkSync(mcpConfigPath); } catch { /* ignore */ }
+    try { fs.unlinkSync(systemPromptPath); } catch { /* ignore */ }
+    throw err;
+  }
 
   const args: string[] = [
     '--print',
@@ -123,15 +131,27 @@ export async function directQuery(
     args.push('--allowedTools', options.allowedTools.join(','));
   }
 
-  args.push(options.prompt);
+  args.push('--', options.prompt); // '--' stops option parsing; prevents prompts like '--help' being treated as flags
 
   log(`Claude CLI: model=${options.model} session=${options.sessionId ?? 'new'} turns≤${options.maxTurns}`);
 
   const queryTimeoutMs = options.timeoutMs ?? 8 * 60_000; // 8 minutes default
 
+  // Whitelist only what the Claude CLI itself needs — NANOCLAW_* vars belong
+  // to the MCP server subprocess (already scoped in mcpServerEnv) and must
+  // not leak into the CLI process.
+  const cliEnv: Record<string, string> = {};
+  for (const key of ['HOME', 'PATH', 'TMPDIR', 'TEMP', 'TERM', 'LANG', 'USER', 'LOGNAME']) {
+    if (process.env[key]) cliEnv[key] = process.env[key]!;
+  }
+  if (process.env.ANTHROPIC_API_KEY)       cliEnv.ANTHROPIC_API_KEY       = process.env.ANTHROPIC_API_KEY;
+  if (process.env.ANTHROPIC_AUTH_TOKEN)    cliEnv.ANTHROPIC_AUTH_TOKEN    = process.env.ANTHROPIC_AUTH_TOKEN;
+  if (process.env.ANTHROPIC_BASE_URL)      cliEnv.ANTHROPIC_BASE_URL      = process.env.ANTHROPIC_BASE_URL;
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) cliEnv.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
   return new Promise((resolve) => {
     const proc = spawn('claude', args, {
-      env: { ...process.env },
+      env: cliEnv,
       cwd: '/workspace/group',
     });
 
@@ -205,7 +225,9 @@ export async function directQuery(
       }
 
       if (code !== 0 && !resultText) {
-        log(`Claude CLI exited ${code} with no result`);
+        log(`Claude CLI exited ${code} with no result — treating as crash`);
+        resolve({ text: QUERY_CRASH_SENTINEL, usage: totalUsage, costUsd: 0, turns: 0 });
+        return;
       }
 
       resolve({

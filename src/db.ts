@@ -669,8 +669,11 @@ export function setSession(
   sessionId: string,
   source: 'interactive' = 'interactive',
 ): void {
+  // ON CONFLICT preserves created_at so the 12-hour age rotation counts from
+  // first session creation, not from the most recent resume turn.
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id, source, created_at) VALUES (?, ?, ?, ?)',
+    `INSERT INTO sessions (group_folder, session_id, source, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(group_folder) DO UPDATE SET session_id = excluded.session_id, source = excluded.source`,
   ).run(groupFolder, sessionId, source, new Date().toISOString());
 }
 
@@ -685,7 +688,10 @@ export function deleteSession(groupFolder: string): void {
 }
 
 /** Return the .jsonl file size in bytes for a session, or -1 if not found. */
-export function getSessionFileSizeBytes(groupFolder: string, sessionId: string): number {
+export function getSessionFileSizeBytes(
+  groupFolder: string,
+  sessionId: string,
+): number {
   try {
     return fs.statSync(sessionJsonlPath(groupFolder, sessionId)).size;
   } catch {

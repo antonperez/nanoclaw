@@ -17,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
-import { directQuery, QUERY_TIMEOUT_SENTINEL } from './direct-api.js';
+import { directQuery, QUERY_TIMEOUT_SENTINEL, QUERY_CRASH_SENTINEL } from './direct-api.js';
 import { classifyQuery, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 interface ContainerInput {
@@ -263,6 +263,12 @@ async function runQuery(
   if (result.text === QUERY_TIMEOUT_SENTINEL) {
     log('Claude CLI timed out — exiting for host to retry with a fresh container');
     throw new Error('QUERY_TIMEOUT: Claude CLI did not respond within the time limit');
+  }
+
+  // Detect CLI crash — non-zero exit with no result event (OOM, SIGSEGV, corrupt --resume JSONL)
+  if (result.text === QUERY_CRASH_SENTINEL) {
+    log('Claude CLI crashed — exiting for host to retry with a fresh container');
+    throw new Error('AGENT_CRASH: Claude CLI exited without producing a result');
   }
 
   // Detect OAuth token expiry (401) before emitting any result.
