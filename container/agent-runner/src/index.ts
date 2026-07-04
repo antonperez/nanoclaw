@@ -177,6 +177,38 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Repair mislanded files after an agent run.
+ * Agents run with cwd=/workspace/group. If they write absolute paths like
+ * /workspace/file.md instead of /workspace/group/file.md, files land one
+ * level too high. Scan /workspace/ for orphaned .md files and known subdirs
+ * and move them into /workspace/group/.
+ */
+function repairFileLanding(log: (msg: string) => void): void {
+  const WS  = '/workspace';
+  const GRP = '/workspace/group';
+  const KNOWN_SUBDIRS = ['wiki', 'notes', 'crm', 'knowledgebase', 'sources', 'files', 'journal', 'projects'];
+
+  try {
+    const entries = fs.readdirSync(WS, { withFileTypes: true });
+    for (const entry of entries) {
+      const src = path.join(WS, entry.name);
+      const dst = path.join(GRP, entry.name);
+      if (entry.isFile() && /\.(md|txt|json)$/.test(entry.name)) {
+        if (!fs.existsSync(dst)) {
+          fs.renameSync(src, dst);
+          log(`[file-landing] moved mislanded file: /workspace/${entry.name} → /workspace/group/`);
+        }
+      } else if (entry.isDirectory() && KNOWN_SUBDIRS.includes(entry.name) && !fs.existsSync(dst)) {
+        fs.renameSync(src, dst);
+        log(`[file-landing] moved mislanded dir: /workspace/${entry.name}/ → /workspace/group/`);
+      }
+    }
+  } catch (err) {
+    log(`[file-landing] scan failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
  * Build the system prompt from template + group CLAUDE.md.
  */
 function buildSystemPrompt(assistantName?: string): string {
@@ -258,6 +290,9 @@ async function runQuery(
     result.usage.cache_creation_input_tokens,
     result.costUsd,
   );
+
+  // Repair files that landed at /workspace/ instead of /workspace/group/
+  repairFileLanding(log);
 
   // Detect CLI hang — process was killed by the per-query timeout
   if (result.text === QUERY_TIMEOUT_SENTINEL) {
