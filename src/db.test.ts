@@ -10,6 +10,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRecentMessages,
+  getSessionFileSizeBytes,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
@@ -719,5 +720,24 @@ describe('getRecentMessages', () => {
     msg('m7', 'Andy: another reply', '2024-01-01T00:00:07.000Z', false, false);
     const contents = getRecentMessages(JID, 'Andy', 10).map((m) => m.content);
     expect(contents).not.toContain('Andy: another reply');
+  });
+});
+
+// --- getSessionFileSizeBytes ---
+
+describe('getSessionFileSizeBytes', () => {
+  it('returns -1 when the session file does not exist', () => {
+    expect(
+      getSessionFileSizeBytes('nonexistent-group', 'fake-session-id'),
+    ).toBe(-1);
+  });
+
+  it('returns -1 for a real group folder with a non-existent session id', () => {
+    expect(
+      getSessionFileSizeBytes(
+        'telegram_main',
+        '00000000-0000-0000-0000-000000000000',
+      ),
+    ).toBe(-1);
   });
 });

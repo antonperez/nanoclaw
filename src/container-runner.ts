@@ -30,7 +30,7 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { detectAuthMode, ensureFreshOAuthToken } from './credential-proxy.js';
 import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -271,28 +271,30 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Default to Sonnet — subagents/tools can still escalate to Opus when needed
-  args.push('-e', 'CLAUDE_MODEL=sonnet');
-
   // iCloud DAV base URL — agents use this to make CalDAV/CardDAV requests via the proxy
   args.push(
     '-e',
     `NANOCLAW_DAV_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__dav`,
   );
 
-  // Auth: pass the real API key directly so containers hit api.anthropic.com.
-  // The credential proxy is still used for DAV (iCloud) requests only.
+  // Auth: inject credentials directly so containers hit api.anthropic.com.
+  // The credential proxy is used for DAV (iCloud) requests only.
   const authMode = detectAuthMode();
   if (authMode === 'api-key') {
     const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
     args.push('-e', `ANTHROPIC_API_KEY=${secrets.ANTHROPIC_API_KEY}`);
   } else {
-    // Legacy OAuth fallback — route through proxy
-    args.push(
-      '-e',
-      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-    );
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // OAuth mode: read (and refresh if near-expiry) the real access token from
+    // ~/.claude/.credentials.json and inject it directly into the container.
+    // The proxy-placeholder approach broke when the exchange endpoint returned 403.
+    const oauthToken = ensureFreshOAuthToken();
+    if (oauthToken) {
+      args.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`);
+    } else {
+      logger.error(
+        'OAuth mode: no token available in ~/.claude/.credentials.json — containers will fail to authenticate',
+      );
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -387,6 +389,7 @@ export async function runContainerAgent(
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
+    const stderrTail: string[] = [];
 
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
@@ -417,6 +420,16 @@ export async function runContainerAgent(
       // Stream-parse for output markers
       if (onOutput) {
         parseBuffer += chunk;
+        // Guard against OOM: if the container floods stdout with data that
+        // never forms valid markers, cap parseBuffer at the same limit as
+        // the stdout log variable so both are bounded.
+        if (parseBuffer.length > CONTAINER_MAX_OUTPUT_SIZE * 2) {
+          logger.warn(
+            { group: group.name, size: parseBuffer.length },
+            'parseBuffer exceeded size limit — clearing to prevent OOM',
+          );
+          parseBuffer = '';
+        }
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
@@ -460,7 +473,10 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (!line) continue;
+        logger.debug({ container: group.folder }, line);
+        stderrTail.push(line);
+        if (stderrTail.length > 10) stderrTail.shift();
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
@@ -631,6 +647,12 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        if (stderrTail.length > 0) {
+          logger.warn(
+            { group: group.name, code, stderrTail },
+            'Container exited non-zero — last stderr lines',
+          );
+        }
         logger.error(
           {
             group: group.name,

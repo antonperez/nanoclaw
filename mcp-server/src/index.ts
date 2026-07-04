@@ -35,19 +35,24 @@ import {
   searchWorkspace,
   getRecentCaptures,
   queryDb,
+  initSyncsDb,
+  syncWrite,
+  syncRead,
 } from './workspace.js';
+
+initSyncsDb();
 
 const PORT = parseInt(process.env.MCP_PORT || '3002', 10);
 const TG_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? '';
-const TG_NOTIFY_CHAT = '-5170181880';
+const TG_NOTIFY_CHAT = process.env.TG_NOTIFY_CHAT || '';
 
 function notifyTelegram(text: string): void {
-  if (!TG_BOT_TOKEN) return;
+  if (!TG_BOT_TOKEN || !TG_NOTIFY_CHAT) return;
   fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ chat_id: TG_NOTIFY_CHAT, text, parse_mode: 'HTML' }),
-  }).catch(() => {}); // fire-and-forget
+  }).catch((e: unknown) => console.warn('[mcp] notify failed:', e));
 }
 const PUBLIC_URL = process.env.MCP_PUBLIC_URL;
 
@@ -121,13 +126,13 @@ const TOOLS = [
   {
     name: 'write_file',
     description:
-      'Write or append to a file in the NanoClaw workspace (groups/telegram_main only — store/ is read-only). Creates parent directories automatically.',
+      'Write or append to a file anywhere in the NanoClaw workspace. Paths are relative to workspace root — e.g. "crm/contacts/john.md", "notes/ideas.md", "journal/2026-05.md". Creates parent directories automatically. store/ is protected (read-only).',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Relative file path (e.g. "notes/ideas.md")',
+          description: 'Relative path from workspace root (e.g. "crm/contacts/john.md", "notes/ideas.md")',
         },
         content: {
           type: 'string',
@@ -145,13 +150,13 @@ const TOOLS = [
   {
     name: 'delete_file',
     description:
-      'Delete a file or empty directory in the NanoClaw workspace (groups/telegram_main only — store/ is protected). Use with care — no undo.',
+      'Delete a file or empty directory anywhere in the NanoClaw workspace. Paths are relative to workspace root — e.g. "crm/contacts/john.md", "notes/draft.md". store/ is protected. Use with care — no undo.',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Relative file path to delete (e.g. "notes/draft.md")',
+          description: 'Relative path from workspace root (e.g. "crm/contacts/john.md", "notes/draft.md")',
         },
       },
       required: ['path'],
@@ -160,13 +165,13 @@ const TOOLS = [
   {
     name: 'query_db',
     description:
-      'Run a read-only SQL SELECT against a NanoClaw SQLite database. Available databases: messages (messages, scheduled_tasks, registered_groups, memory_hot, sessions), store (general), nanoclaw. Returns CSV with header.',
+      'Run a read-only SQL SELECT against a NanoClaw SQLite database. Available databases: messages (messages, scheduled_tasks, registered_groups, memory_hot, sessions), store (general), nanoclaw, syncs (cross-project sync bus). Returns CSV with header.',
     inputSchema: {
       type: 'object',
       properties: {
         db: {
           type: 'string',
-          description: 'Database name without extension: "messages", "store", or "nanoclaw"',
+          description: 'Database name without extension: "messages", "store", "nanoclaw", or "syncs"',
         },
         sql: {
           type: 'string',
@@ -174,6 +179,63 @@ const TOOLS = [
         },
       },
       required: ['db', 'sql'],
+    },
+  },
+  {
+    name: 'sync_write',
+    description:
+      'Record a cross-project sync line. Called at the end of a conversation when a decision, pattern, or system change meets the recall test: "would I want to find this in 3 weeks?" Projects: bdo, investmentology, ai-sandbox, antonperez, anton7.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: {
+          type: 'string',
+          enum: ['bdo', 'investmentology', 'ai-sandbox', 'antonperez', 'anton7'],
+          description: 'Project this sync line belongs to',
+        },
+        slot1: {
+          type: 'string',
+          description: 'The decision or insight being consolidated (required)',
+        },
+        slot2: {
+          type: 'string',
+          description: 'Cross-domain consequence in another domain (optional)',
+        },
+        slot3: {
+          type: 'string',
+          description: 'Concrete system change that was made (optional)',
+        },
+        confidence: {
+          type: 'string',
+          enum: ['HIGH', 'LOW'],
+          description: "Recall confidence. Default: 'HIGH'",
+        },
+      },
+      required: ['project', 'slot1'],
+    },
+  },
+  {
+    name: 'sync_read',
+    description:
+      'Retrieve recent sync lines grouped by project. Call automatically at Anton 7.0 session start and on demand when Anton says "sync". Defaults to last 7 days, HIGH confidence only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: {
+          type: 'number',
+          description: 'Lookback window in days (default 7)',
+        },
+        project: {
+          type: 'string',
+          enum: ['bdo', 'investmentology', 'ai-sandbox', 'antonperez', 'anton7'],
+          description: 'Filter to a single project (omit for all)',
+        },
+        confidence: {
+          type: 'string',
+          enum: ['HIGH', 'LOW'],
+          description: "Filter by confidence level. Default: 'HIGH'",
+        },
+      },
     },
   },
 ];
@@ -200,9 +262,6 @@ function makeServer() {
       case 'write_file': {
         const wMode = (a.mode as 'overwrite' | 'append') ?? 'overwrite';
         text = writeFile(String(a.path ?? ''), String(a.content ?? ''), wMode);
-        notifyTelegram(
-          `🔧 <b>MCP write_file</b>\nPath: <code>${a.path}</code>\nMode: ${wMode}\nStatus: ${text}`,
-        );
         break;
       }
       case 'delete_file': {
@@ -220,6 +279,22 @@ function makeServer() {
         break;
       case 'query_db':
         text = queryDb(String(a.db ?? ''), String(a.sql ?? ''));
+        break;
+      case 'sync_write':
+        text = syncWrite(
+          String(a.project ?? ''),
+          String(a.slot1 ?? ''),
+          a.slot2 ? String(a.slot2) : undefined,
+          a.slot3 ? String(a.slot3) : undefined,
+          a.confidence ? String(a.confidence) : undefined,
+        );
+        break;
+      case 'sync_read':
+        text = syncRead(
+          a.days != null ? Number(a.days) : undefined,
+          a.project ? String(a.project) : undefined,
+          a.confidence ? String(a.confidence) : undefined,
+        );
         break;
       default:
         text = `Error: unknown tool "${name}"`;

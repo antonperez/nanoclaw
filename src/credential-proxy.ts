@@ -9,10 +9,16 @@
  *             API key via /api/oauth/claude_cli/create_api_key.
  *             Proxy injects real OAuth token on that exchange request;
  *             subsequent requests carry the temp key which is valid as-is.
+ *             Token is read fresh from ~/.claude/.credentials.json so it
+ *             stays valid across automatic refreshes (expires ~8h).
  */
 import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
+import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -134,6 +140,139 @@ function handleDavRequest(
   );
 }
 
+/**
+ * Read the current OAuth access token.
+ * Priority: CLAUDE_CODE_OAUTH_TOKEN env/envfile → ~/.claude/.credentials.json
+ * Cached for 60s to avoid file I/O per request, while still picking up refreshes.
+ */
+let _oauthTokenCache: { token: string; expiresAt: number } | null = null;
+
+export function readOAuthToken(envFileToken?: string): string | undefined {
+  // Explicit env override always wins (no caching needed, it's static)
+  if (envFileToken) return envFileToken;
+
+  const now = Date.now();
+  if (_oauthTokenCache && now < _oauthTokenCache.expiresAt) {
+    return _oauthTokenCache.token;
+  }
+
+  // Read from Claude Code's credentials file
+  const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+  try {
+    const raw = fs.readFileSync(credPath, 'utf-8');
+    const creds = JSON.parse(raw) as Record<string, unknown>;
+    const oauth = creds.claudeAiOauth as Record<string, unknown> | undefined;
+    const token = oauth?.accessToken as string | undefined;
+    if (token) {
+      _oauthTokenCache = { token, expiresAt: now + 60_000 };
+      return token;
+    }
+  } catch {
+    // Credentials file absent or unreadable — fall through
+  }
+
+  return undefined;
+}
+
+/**
+ * Read the OAuth token, refreshing it first if it expires within 15 minutes.
+ *
+ * Refresh strategy (in order):
+ *   1. `claude auth status` — proactively refreshes tokens that are still
+ *      valid but near expiry. Fast, no token cost.
+ *   2. `claude --print . --max-turns 1` — forces a real API call that
+ *      triggers Claude Code's OAuth refresh flow. Used only when the token
+ *      is already expired and step 1 had no effect. Costs ~5 Haiku tokens.
+ *
+ * Called once per container spawn (not per request), so the extra latency
+ * is acceptable.
+ */
+export function ensureFreshOAuthToken(): string | undefined {
+  const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+  const REFRESH_AHEAD_MS = 15 * 60 * 1000; // refresh if < 15 min remaining
+
+  function readFromDisk(): { token?: string; expiresAt?: number } {
+    try {
+      const raw = fs.readFileSync(credPath, 'utf-8');
+      const creds = JSON.parse(raw) as Record<string, unknown>;
+      const oauth = creds.claudeAiOauth as Record<string, unknown> | undefined;
+      return {
+        token: oauth?.accessToken as string | undefined,
+        expiresAt: oauth?.expiresAt as number | undefined,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  const { token, expiresAt } = readFromDisk();
+  const now = Date.now();
+
+  if (token && expiresAt && expiresAt > now + REFRESH_AHEAD_MS) {
+    return token; // Fresh enough — use as-is
+  }
+
+  const remainingMin = expiresAt
+    ? ((expiresAt - now) / 60_000).toFixed(1)
+    : 'unknown';
+  logger.info(
+    { remainingMin },
+    'OAuth token near/past expiry — attempting refresh',
+  );
+
+  // Step 1: lightweight refresh (works when token is still valid)
+  try {
+    execFileSync('claude', ['auth', 'status'], {
+      timeout: 30_000,
+      stdio: 'ignore',
+    });
+  } catch {
+    /* ignore */
+  }
+
+  const after = readFromDisk();
+  if (after.token && after.expiresAt && after.expiresAt > now + 60_000) {
+    logger.info('OAuth token refreshed via auth status');
+    _oauthTokenCache = null; // invalidate proxy cache
+    return after.token;
+  }
+
+  // Step 2: token still expired — force a real API call to trigger refresh
+  logger.warn(
+    'auth status did not refresh token — forcing refresh via API call (~5 Haiku tokens)',
+  );
+  try {
+    execFileSync(
+      'claude',
+      [
+        '--print',
+        '.',
+        '--model',
+        'claude-haiku-4-5',
+        '--max-turns',
+        '1',
+      ],
+      { timeout: 60_000, stdio: 'ignore' },
+    );
+  } catch {
+    /* ignore */
+  }
+
+  const final = readFromDisk();
+  _oauthTokenCache = null; // invalidate proxy cache regardless
+  if (final.token && final.expiresAt && final.expiresAt > now) {
+    logger.info(
+      { expiresIn: `${((final.expiresAt - now) / 60_000).toFixed(1)}m` },
+      'OAuth token refreshed via API call',
+    );
+  } else {
+    logger.error(
+      'OAuth token refresh failed — container may fail to authenticate',
+    );
+  }
+  return final.token;
+}
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
@@ -155,7 +294,9 @@ export function startCredentialProxy(
       : null;
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken = secrets.CLAUDE_CODE_OAUTH_TOKEN;
+  // envFileToken is the static override from .env; readOAuthToken() falls back
+  // to ~/.claude/.credentials.json per request so tokens auto-refresh.
+  const envFileToken = secrets.CLAUDE_CODE_OAUTH_TOKEN;
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -211,8 +352,9 @@ export function startCredentialProxy(
           // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            const token = readOAuthToken(envFileToken);
+            if (token) {
+              headers['authorization'] = `Bearer ${token}`;
             }
           }
         }

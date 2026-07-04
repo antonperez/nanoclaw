@@ -1,95 +1,151 @@
 import { describe, it, expect } from 'vitest';
-import { classifyQuery, buildToolFilter } from './query-classifier.js';
+import { classifyQuery, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 // --- classifyQuery ---
 
 describe('classifyQuery', () => {
-  it('routes scheduled tasks to haiku', () => {
+  it('routes scheduled tasks to sonnet', () => {
     const result = classifyQuery('Run the daily brief', true);
-    expect(result.model).toContain('haiku');
+    expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('scheduled-task');
   });
 
-  it('routes simple greetings to haiku', () => {
-    for (const greeting of ['hi', 'Hello', 'good morning', 'thanks', 'gm', 'ok']) {
-      const result = classifyQuery(greeting, false);
-      expect(result.model).toContain('haiku');
-      expect(result.reason).toBe('simple-pattern');
-    }
+  it('routes r: prefix to sonnet', () => {
+    const result = classifyQuery('r: udemy access via BDO', false);
+    expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('r-prefix');
   });
 
-  it('routes greeting with trailing punctuation to haiku', () => {
-    for (const greeting of ['hi!', 'thanks.', 'ok?', 'bye!']) {
-      const result = classifyQuery(greeting, false);
-      expect(result.model).toContain('haiku');
-      expect(result.reason).toBe('simple-pattern');
-    }
+  it('routes remember: prefix to sonnet', () => {
+    const result = classifyQuery('remember: therapy notes', false);
+    expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('r-prefix');
   });
 
-  it('does not route greeting followed by a request to haiku', () => {
-    const result = classifyQuery('hi can you schedule a meeting', false);
+  it('routes remember with space prefix to sonnet', () => {
+    const result = classifyQuery('remember this important thing', false);
+    expect(result.model).toContain('sonnet');
+    expect(result.reason).toBe('r-prefix');
+  });
+
+  it('r: prefix is case-insensitive', () => {
+    const result = classifyQuery('R: BDO has udemy', false);
+    expect(result.reason).toBe('r-prefix');
+  });
+
+  it('routes general prompts to sonnet by default', () => {
+    const result = classifyQuery('what are the odds sinner wins wimbledon?', false);
     expect(result.model).toContain('sonnet');
     expect(result.reason).toBe('default-sonnet');
   });
 
-  it('does not route greeting with extra words to haiku', () => {
-    for (const prompt of ['hello how are you', 'ok sounds good', 'thanks for the help']) {
-      const result = classifyQuery(prompt, false);
-      expect(result.model).toContain('sonnet');
-      expect(result.reason).toBe('default-sonnet');
-    }
+  it('routes o: prefix to opus', () => {
+    const result = classifyQuery('o: second-order think this BDO situation', false);
+    expect(result.model).toContain('opus');
+    expect(result.reason).toBe('o-prefix');
   });
 
-  it('routes complex prompts to sonnet', () => {
-    const longPrompt = 'Please analyze the quarterly report and summarize the key findings for the team meeting. '.repeat(4);
-    const result = classifyQuery(longPrompt, false);
-    expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
+  it('o: prefix is case-insensitive', () => {
+    const result = classifyQuery('O: analyse this', false);
+    expect(result.reason).toBe('o-prefix');
   });
 
-  it('routes prompt with tool keywords to sonnet', () => {
-    const result = classifyQuery('schedule a meeting for tomorrow at 3pm', false);
-    expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
-  });
-
-  it('routes general questions to sonnet', () => {
-    const result = classifyQuery('what is the capital of France?', false);
-    expect(result.model).toContain('sonnet');
-    expect(result.reason).toBe('default-sonnet');
-  });
-
-  it('scheduled task overrides all other checks', () => {
-    const result = classifyQuery(
-      'Analyze my spending this month and create a summary report with charts',
-      true,
-    );
-    expect(result.model).toContain('haiku');
+  it('scheduled task takes precedence over o: prefix', () => {
+    const result = classifyQuery('o: daily brief', true);
     expect(result.reason).toBe('scheduled-task');
+  });
+
+});
+
+// --- stripRPrefix ---
+
+describe('stripRPrefix', () => {
+  it('strips r: prefix', () => {
+    expect(stripRPrefix('r: udemy access via BDO')).toBe('udemy access via BDO');
+  });
+
+  it('strips remember: prefix', () => {
+    expect(stripRPrefix('remember: therapy notes')).toBe('therapy notes');
+  });
+
+  it('strips remember with trailing space', () => {
+    expect(stripRPrefix('remember this')).toBe('this');
+  });
+
+  it('strips R: case-insensitively', () => {
+    expect(stripRPrefix('R: some fact')).toBe('some fact');
+  });
+
+  it('strips leading whitespace before prefix', () => {
+    expect(stripRPrefix('  r: indented')).toBe('indented');
   });
 });
 
-// --- buildToolFilter ---
+// --- isRPrefix ---
 
-describe('buildToolFilter', () => {
-  const allTools = [
-    'bash', 'read_file', 'write_file',
-    'mcp__nanoclaw__send_message', 'mcp__nanoclaw__web_fetch',
-    'mcp__nanoclaw__manage_tasks',
-    'mcp__nanoclaw__send_email', 'mcp__nanoclaw__dav_request',
-    'mcp__nanoclaw__register_group',
-  ].map(name => ({ name }));
+describe('isRPrefix', () => {
+  it('returns true for r: prefix', () => { expect(isRPrefix('r: fact')).toBe(true); });
+  it('returns true for remember: prefix', () => { expect(isRPrefix('remember: fact')).toBe(true); });
+  it('returns true for remember with space', () => { expect(isRPrefix('remember this')).toBe(true); });
+  it('returns false for regular message', () => { expect(isRPrefix('what is the weather?')).toBe(false); });
+  it('returns false for q: prefix', () => { expect(isRPrefix('q: quick question')).toBe(false); });
+});
 
+// --- getAllowedTools ---
+
+describe('getAllowedTools', () => {
+  it('returns core 5 tools for a simple prompt', () => {
+    const tools = getAllowedTools('hello', true);
+    expect(tools).toHaveLength(5);
+    expect(tools).toContain('Bash');
+    expect(tools).toContain('Read');
+    expect(tools).toContain('Write');
+    expect(tools).toContain('mcp__nanoclaw__send_message');
+    expect(tools).toContain('mcp__nanoclaw__web_fetch');
+  });
+
+  it('adds manage_tasks for scheduling keywords', () => {
+    const tools = getAllowedTools('schedule a reminder for tomorrow', true);
+    expect(tools).toContain('mcp__nanoclaw__manage_tasks');
+  });
+
+  it('adds send_email for email keywords', () => {
+    const tools = getAllowedTools('send an email to john', true);
+    expect(tools).toContain('mcp__nanoclaw__send_email');
+  });
+
+  it('adds dav_request for calendar keywords', () => {
+    const tools = getAllowedTools('check my calendar events', true);
+    expect(tools).toContain('mcp__nanoclaw__dav_request');
+  });
+
+  it('excludes register_group when not main', () => {
+    const tools = getAllowedTools('register a new group', false);
+    expect(tools).not.toContain('mcp__nanoclaw__register_group');
+  });
+
+  it('returns only send_message for simple-pattern routing', () => {
+    const tools = getAllowedTools('hi', true, 'simple-pattern');
+    expect(tools).toEqual(['mcp__nanoclaw__send_message']);
+  });
+
+  it('returns an array not a Set', () => {
+    expect(Array.isArray(getAllowedTools('hello', true))).toBe(true);
+  });
+});
+
+// --- getAllowedTools ---
+
+describe('getAllowedTools', () => {
   function filterNames(prompt: string, isMain = true, routingReason?: string): string[] {
-    const filter = buildToolFilter(prompt, isMain, routingReason);
-    return allTools.filter(filter).map(t => t.name);
+    return getAllowedTools(prompt, isMain, routingReason);
   }
 
   it('always includes core tools', () => {
     const names = filterNames('hello');
-    expect(names).toContain('bash');
-    expect(names).toContain('read_file');
-    expect(names).toContain('write_file');
+    expect(names).toContain('Bash');
+    expect(names).toContain('Read');
+    expect(names).toContain('Write');
     expect(names).toContain('mcp__nanoclaw__send_message');
     expect(names).toContain('mcp__nanoclaw__web_fetch');
   });
@@ -147,11 +203,11 @@ describe('buildToolFilter', () => {
     expect(names).toHaveLength(1);
   });
 
-  it('minimal mode: does not include bash, read_file, web_fetch', () => {
+  it('minimal mode: does not include Bash, Read, Write, web_fetch', () => {
     const names = filterNames('thanks', true, 'simple-pattern');
-    expect(names).not.toContain('bash');
-    expect(names).not.toContain('read_file');
-    expect(names).not.toContain('write_file');
+    expect(names).not.toContain('Bash');
+    expect(names).not.toContain('Read');
+    expect(names).not.toContain('Write');
     expect(names).not.toContain('mcp__nanoclaw__web_fetch');
   });
 

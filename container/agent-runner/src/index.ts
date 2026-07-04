@@ -17,8 +17,8 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
-import { directQuery } from './direct-api.js';
-import { classifyQuery, buildToolFilter } from './query-classifier.js';
+import { directQuery, QUERY_TIMEOUT_SENTINEL, QUERY_CRASH_SENTINEL } from './direct-api.js';
+import { classifyQuery, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 interface ContainerInput {
   prompt: string;
@@ -198,8 +198,7 @@ function buildSystemPrompt(assistantName?: string): string {
 }
 
 /**
- * Run a single query using the direct Anthropic Messages API.
- * Bypasses the Claude Code CLI/SDK to eliminate ~12K tokens of overhead.
+ * Run a single query via the Claude Code CLI (OAuth-compatible).
  */
 async function runQuery(
   prompt: string,
@@ -213,36 +212,29 @@ async function runQuery(
   const systemPrompt = buildSystemPrompt(containerInput.assistantName);
   log(`System prompt: ${systemPrompt.length} chars (~${Math.round(systemPrompt.length / 4)} tokens)`);
 
-  // Session path — reuse SDK-compatible location so host session tracking works
-  const sessionDir = '/home/node/.claude/projects/-workspace-group';
-  const sid = sessionId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const sessionPath = path.join(sessionDir, `${sid}.jsonl`);
-  fs.mkdirSync(sessionDir, { recursive: true });
-
   // Smart model routing — classify query to pick cheapest adequate model
   const routing = classifyQuery(prompt, containerInput.isScheduledTask ?? false);
 
   // Allow CLAUDE_MODEL env to override routing (e.g. force opus for testing)
   const envModel = process.env.CLAUDE_MODEL;
   const MODEL_ALIASES: Record<string, string> = {
-    sonnet: 'claude-sonnet-4-20250514',
-    opus: 'claude-opus-4-20250514',
-    haiku: 'claude-haiku-4-5-20251001',
+    sonnet: 'claude-sonnet-5',
+    opus: 'claude-opus-4-8',
+    haiku: 'claude-haiku-4-5',
   };
   const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
   log(`Model routing: ${model} (reason: ${envModel ? 'env-override' : routing.reason})`);
 
-  // Conditional tool loading — only include tools the prompt actually needs
-  const toolFilter = buildToolFilter(prompt, containerInput.isMain, routing.reason);
+  const isMain = containerInput.isMain ?? false;
+  const allowedTools = getAllowedTools(prompt, isMain, routing.reason);
+  log(`Tool filter: ${allowedTools.length} tools [${allowedTools.join(', ')}]`);
 
-  // D: Zero history for scheduled tasks (stateless), E: lower max_tokens for simple queries
   const isScheduled = containerInput.isScheduledTask ?? false;
-  const isSimple = routing.reason === 'simple-pattern';
 
   const result = await directQuery({
     prompt,
     systemPrompt,
-    sessionPath,
+    sessionId,
     mcpServerCommand: 'node',
     mcpServerArgs: [mcpServerPath],
     mcpServerEnv: {
@@ -251,11 +243,8 @@ async function runQuery(
       NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
     },
     maxTurns: isScheduled ? 8 : 15,
-    maxBudgetUsd: isScheduled ? 0.10 : 0.25,
     model,
-    maxHistoryTokens: isScheduled ? 0 : 24000,
-    maxResponseTokens: isSimple ? 512 : 4096,
-    toolFilter,
+    allowedTools,
     log,
   });
 
@@ -270,18 +259,39 @@ async function runQuery(
     result.costUsd,
   );
 
+  // Detect CLI hang — process was killed by the per-query timeout
+  if (result.text === QUERY_TIMEOUT_SENTINEL) {
+    log('Claude CLI timed out — exiting for host to retry with a fresh container');
+    throw new Error('QUERY_TIMEOUT: Claude CLI did not respond within the time limit');
+  }
+
+  // Detect CLI crash — non-zero exit with no result event (OOM, SIGSEGV, corrupt --resume JSONL)
+  if (result.text === QUERY_CRASH_SENTINEL) {
+    log('Claude CLI crashed — exiting for host to retry with a fresh container');
+    throw new Error('AGENT_CRASH: Claude CLI exited without producing a result');
+  }
+
+  // Detect OAuth token expiry (401) before emitting any result.
+  // When the injected token expires inside a long-running container, the CLI
+  // returns a 401 error text with zero cost. Exit immediately so the host
+  // spawns a fresh container with a new token on the next message.
+  if (result.costUsd === 0 && result.text?.includes('API Error: 401')) {
+    log('Auth failure (401) — token expired in long-running container, exiting for respawn');
+    throw new Error('AUTH_FAILURE_401: OAuth token expired');
+  }
+
   // Emit result
   writeOutput({
     status: 'success',
     result: result.text,
-    newSessionId: sid,
+    newSessionId: result.sessionId,
   });
 
   log(`Query done. Turns: ${result.turns}, cost: $${result.costUsd.toFixed(4)}`);
 
   // Check for close sentinel that may have arrived during the query
   const closedDuringQuery = shouldClose();
-  return { newSessionId: sid, closedDuringQuery };
+  return { newSessionId: result.sessionId, closedDuringQuery };
 }
 
 interface ScriptResult {
@@ -378,6 +388,14 @@ async function main(): Promise<void> {
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+  }
+
+  // r: / remember: prefix — strip prefix and prepend write-to-memory instruction.
+  // Append to /workspace/group/notes/memory.md (date-stamped bullet). Sonnet handles it.
+  const isRemember = isRPrefix(prompt);
+  if (isRemember) {
+    const fact = stripRPrefix(prompt);
+    prompt = `Remember this — append it as a bullet to /workspace/group/notes/memory.md (create the file if it doesn't exist). Format each line as: \`- YYYY-MM-DD: <fact>\`. Use today's date. Write exactly this fact:\n\n${fact}\n\nAfter writing, reply with: ✓ Remembered.`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {

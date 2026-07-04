@@ -28,7 +28,7 @@ const AUTH_CODE_TTL_MS = 5 * 60 * 1000; // 5 min
 // Persist OAuth state to disk so restarts don't invalidate Claude Desktop's
 // stored tokens. Without this, every server restart forces re-authentication.
 const STATE_PATH =
-  process.env.MCP_OAUTH_STATE_PATH || '/mnt/pi/nanoclaw/mcp-oauth-state.json';
+  process.env.MCP_OAUTH_STATE_PATH || '/mnt/pi/nanoclaw/data/mcp-oauth-state.json';
 
 interface PersistedState {
   clients: Record<string, OAuthClientInformationFull>;

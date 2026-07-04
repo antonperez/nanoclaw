@@ -53,6 +53,7 @@ vi.mock('./db.js', () => ({
 
 vi.mock('./group-folder.js', () => ({
   isValidGroupFolder: vi.fn(() => true),
+  ensureWithinBase: vi.fn(), // no-op: tests use valid in-group paths
 }));
 
 vi.mock('./container-runner.js', () => ({

@@ -17,7 +17,8 @@ export function logUsage(
   logDir?: string,
 ): void {
   try {
-    const logPath = path.join(logDir ?? STORE_DIR, 'tokens.csv');
+    const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const logPath = path.join(logDir ?? STORE_DIR, `tokens-${month}.csv`);
     if (!fs.existsSync(logPath)) {
       fs.writeFileSync(logPath, HEADER + '\n');
     }

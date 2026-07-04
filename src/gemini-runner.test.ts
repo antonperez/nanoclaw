@@ -84,7 +84,8 @@ describe('logGeminiUsage', () => {
   });
 
   function readLog(): string[] {
-    const p = path.join(tmpDir, 'tokens.csv');
+    const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const p = path.join(tmpDir, `tokens-${month}.csv`);
     if (!fs.existsSync(p)) return [];
     return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # perf-report.sh — Generate and send Pi4 performance report via Telegram.
-# Covers the last 3.5 days of data. Runs Mon + Thu.
+# Covers the last 3.5 days of data. Runs Mon + Thu. Pi4 is permanent host.
 
 set -euo pipefail
 
@@ -19,7 +19,6 @@ import json, sys
 from datetime import datetime, timedelta, timezone
 
 PERF_LOG = "/mnt/pi/nanoclaw/logs/perf.jsonl"
-TRIAL_END = datetime(2026, 4, 30, tzinfo=timezone.utc)
 NOW = datetime.now(timezone.utc)
 CUTOFF = NOW - timedelta(hours=84)  # ~3.5 days
 
@@ -38,12 +37,6 @@ with open(PERF_LOG) as f:
                 rows.append(d)
         except Exception:
             pass
-
-# Trial progress
-trial_start = datetime(2026, 4, 4, tzinfo=timezone.utc)
-trial_days_elapsed = (NOW - trial_start).days
-trial_days_total = (TRIAL_END - trial_start).days
-trial_pct = min(trial_days_elapsed / trial_days_total * 100, 100)
 
 if not rows:
     print("No data yet for this period.")
@@ -115,7 +108,7 @@ if df_root_pct > 85:
 if df_data_pct > 85:
     issues.append(f"⚠️ Data disk full ({df_data_pct:.0f}%)")
 
-verdict = "✅ Pi4 handling it well" if not issues else "\n".join(issues)
+verdict = "✅ Healthy" if not issues else "\n".join(issues)
 
 pruned_count = total_in_log - len(rows)
 data_note = f"_{period_start} → {period_end} · {samples} samples"
@@ -123,10 +116,8 @@ if pruned_count > 0:
     data_note += f" · {pruned_count} older (>3.5d, still in file)"
 data_note += "_"
 
-print(f"""📊 *NanoClaw Pi4 Trial Report*
+print(f"""📊 *NanoClaw Pi4 Performance Report*
 {data_note}
-
-*Trial* {trial_days_elapsed}/{trial_days_total}d ({trial_pct:.0f}%)
 
 *System*
 Load: {avg_load:.2f} avg / {max_load:.2f} peak

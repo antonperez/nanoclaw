@@ -195,6 +195,17 @@ export function checkBashCommand(command: string): string | null {
     if (!first) continue;
     if (!BASH_ALLOWED_CMDS.has(first))
       return `'${first}' not allowed. Permitted: ${[...BASH_ALLOWED_CMDS].join(', ')}`;
+    // markitdown only takes a positional arg (file path or URL) plus optional -o.
+    // Reject any other flags — Gemini hallucinates --url, --output-format, -x, etc.
+    if (first === 'markitdown') {
+      const badFlags = seg
+        .match(/\s(-{1,2}[a-zA-Z]\S*)/g)
+        ?.map((f) => f.trim())
+        .filter((f) => f !== '-o');
+      if (badFlags && badFlags.length > 0) {
+        return `markitdown: invalid flag(s) ${badFlags.join(', ')}. Correct usage: markitdown "<URL or file path>"`;
+      }
+    }
   }
   return null;
 }
@@ -225,8 +236,13 @@ async function runBash(groupDir: string, command: string): Promise<string> {
   }
 }
 
-// Files the LLM must not overwrite — identity and schema files
-const WRITE_PROTECTED = new Set(['CLAUDE.md', 'REFERENCE.md']);
+// Files the LLM must not overwrite — identity, schema, and system-prompt source files
+const WRITE_PROTECTED = new Set([
+  'CLAUDE.md',
+  'REFERENCE.md',
+  'knowledgebase/system/workspace-layout.md',
+  'knowledgebase/system/operating-rules.md',
+]);
 
 function writeMdFile(
   groupDir: string,
@@ -236,8 +252,9 @@ function writeMdFile(
   const resolved = safeResolveMd(groupDir, relativePath);
   if (!resolved)
     return 'Error: only .md files inside the workspace are allowed.';
-  if (WRITE_PROTECTED.has(path.basename(resolved)))
-    return `Error: ${path.basename(resolved)} is write-protected and cannot be overwritten.`;
+  const rel = relativePath.replace(/^\.\/+/, '');
+  if (WRITE_PROTECTED.has(rel) || WRITE_PROTECTED.has(path.basename(resolved)))
+    return `Error: ${rel} is write-protected and cannot be overwritten.`;
   try {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content, 'utf8');
@@ -312,7 +329,7 @@ const TOOLS = [
     function: {
       name: 'bash',
       description:
-        'Run a shell command in the group workspace directory. Use for: curl (fetch URLs/PDFs), markitdown (convert PDF/doc to markdown), nanoclaw-vision (describe images), ls/find/cat (file ops). Pipe (|) and && chaining supported. No shell redirects (>), no rm, no sudo.',
+        'Run a shell command in the group workspace directory. Use for: markitdown (convert URL/PDF/DOCX/HTML to markdown — pass the URL or file path as the ONLY positional arg, e.g. `markitdown "https://example.com/post"` or `markitdown sources/file.pdf`; never use --url, never pipe curl into it), curl (only if markitdown fails on a URL — use `curl -sLo path/file.ext "https://..."` then `markitdown path/file.ext`), nanoclaw-vision (describe images), ls/find/cat (file ops). Pipe (|) and && chaining supported. No shell redirects (>), no rm, no sudo.',
       parameters: {
         type: 'object',
         properties: {
@@ -343,14 +360,22 @@ async function geminiChat(
     body.tool_choice = 'auto';
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${GEMINI_API_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Retry on transient errors (429 rate limit, 5xx server) up to 2 extra
   // attempts with linear backoff. Daily-driver Gemini Flash hits 429 on
@@ -401,7 +426,7 @@ function buildSystemPrompt(
   wikiOp: boolean,
 ): string {
   // Always inject CLAUDE.md and workspace-layout.md so Gemini has user context
-  // and filing path conventions without a tool-call round trip. WORKFLOW.md is
+  // and filing path conventions without a tool-call round trip. workflow.md is
   // injected only on /wiki triggers — non-wiki messages skip the extra ~1KB.
   const docs = [
     loadDoc(groupDir, 'CLAUDE.md', 'Personal context'),
@@ -415,7 +440,7 @@ function buildSystemPrompt(
       'knowledgebase/system/operating-rules.md',
       'Operating rules',
     ),
-    wikiOp ? loadDoc(groupDir, 'wiki/WORKFLOW.md', 'Wiki workflow') : '',
+    wikiOp ? loadDoc(groupDir, 'wiki/workflow.md', 'Wiki workflow') : '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -425,8 +450,14 @@ function buildSystemPrompt(
     ? `\n\nWorkspace (use list_files to browse a folder, read_file to read, write_file to save):\n${index}`
     : '\n\nNo memory files yet. Use write_file to create notes or memory (e.g. "MEMORY.md").';
 
+  // Date-only — no per-minute time. Keeping the prefix stable across messages
+  // lets Gemini's implicit cache hit consistently. Time-of-day is injected
+  // per-message in the user turn instead (see stampUserMessages).
+  const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
   return [
     `You are ${assistantName}, a proactive personal assistant. Be concise and direct. Connect the dots across context — notice patterns, surface relevant past notes, and anticipate what the user needs.`,
+    `Today is ${dateStr} PHT. When filing journal entries or dated notes, use this exact date.`,
     'Format for WhatsApp/Telegram: use *single asterisks* for bold, _underscores_ for italic, • for bullets. No ## headings, no **double stars**, no [markdown links](url).',
     docs,
     fileIndex,
@@ -437,7 +468,7 @@ function buildSystemPrompt(
 
 const MAX_HISTORY_MESSAGES = 30;
 const HOT_MEMORY_HOURS = 48;
-const HOT_MEMORY_MAX = 30;
+const HOT_MEMORY_MAX = 15;
 
 /**
  * Drop user messages already represented in hot memory and any from-me echoes.
@@ -483,7 +514,7 @@ export async function runGeminiAgent(
 
   const newUserMessages = dedupeUserMessages(recentMessages, hotEvents);
 
-  // Detect a /wiki trigger in the new user batch so we can inject WORKFLOW.md
+  // Detect a /wiki trigger in the new user batch so we can inject workflow.md
   // for ingest/query/lint without polluting non-wiki conversations.
   const wikiOp = newUserMessages.some((m) =>
     /^\s*\/wiki\b/i.test(m.content || ''),
@@ -496,16 +527,30 @@ export async function runGeminiAgent(
     content: e.content,
   }));
 
+  const timeStr = new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Manila',
+    hour12: false,
+  });
+
+  const userTurns = newUserMessages.map((m, i) => ({
+    role: 'user' as GeminiMessage['role'],
+    // Stamp only the last incoming message so the model knows the current time
+    // without it landing in the (cached) system prompt.
+    content:
+      i === newUserMessages.length - 1
+        ? `[${timeStr} PHT] ${m.content as string}`
+        : (m.content as string),
+  }));
+
   const conversation: GeminiMessage[] = [
     {
       role: 'system',
       content: buildSystemPrompt(assistantName, groupDir, wikiOp),
     },
     ...hotConversation,
-    ...newUserMessages.map((m) => ({
-      role: 'user' as GeminiMessage['role'],
-      content: m.content as string,
-    })),
+    ...userTurns,
   ];
 
   for (let turn = 0; turn < GEMINI_MAX_TOOL_TURNS; turn++) {

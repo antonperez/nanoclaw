@@ -3,12 +3,19 @@
  * Extracted for testability.
  */
 
-const HAIKU = 'claude-haiku-4-5-20251001';
-const SONNET = 'claude-sonnet-4-20250514';
+const SONNET = 'claude-sonnet-5';
+const OPUS = 'claude-opus-4-8';
 
-// Core tools always loaded
+// o: prefix — user-controlled Opus override
+const O_PREFIX = /^\s*o:/i;
+
+// r: prefix — explicit memory write. Strips prefix, tells Andy to persist the fact.
+// Accepts: "r:", "r :", "remember:", "remember "
+const R_PREFIX = /^\s*r(?:emember)?[: ]/i;
+
+// Core tools always loaded. Built-in Claude CLI tool names are PascalCase (Bash, Read, Write).
 const CORE_TOOLS = new Set([
-  'bash', 'read_file', 'write_file',
+  'Bash', 'Read', 'Write',
   'mcp__nanoclaw__send_message', 'mcp__nanoclaw__web_fetch',
 ]);
 
@@ -26,34 +33,41 @@ const TOOL_TRIGGERS: Array<{ pattern: RegExp; tools: string[] }> = [
 ];
 
 /**
- * Classify a query to select the cheapest adequate model.
+ * Classify a query to select the model.
+ * Sonnet is the default; use o: prefix to force Opus.
  */
 export function classifyQuery(
   prompt: string,
   isScheduledTask: boolean,
 ): { model: string; reason: string } {
-  if (isScheduledTask) {
-    return { model: HAIKU, reason: 'scheduled-task' };
-  }
-  const simplePatterns = /^(hi|hello|hey|good morning|good afternoon|good evening|good night|what time|what day|what date|thank|thanks|thank you|ty|ok|okay|sure|yes|no|yep|nope|yea|yeah|nah|cool|nice|great|got it|gm|gn|lol|haha|bye|later|cheers|np|k)\s*[.!?]*$/i;
-  if (simplePatterns.test(prompt.trim())) {
-    return { model: HAIKU, reason: 'simple-pattern' };
-  }
+  if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
+  if (O_PREFIX.test(prompt)) return { model: OPUS, reason: 'o-prefix' };
+  if (R_PREFIX.test(prompt)) return { model: SONNET, reason: 'r-prefix' };
   return { model: SONNET, reason: 'default-sonnet' };
 }
 
+/** Returns true when the prompt starts with r:/remember: prefix. */
+export function isRPrefix(prompt: string): boolean {
+  return R_PREFIX.test(prompt);
+}
+
+/** Strip the r:/remember: prefix and return the bare content. */
+export function stripRPrefix(prompt: string): string {
+  return prompt.replace(R_PREFIX, '').trim();
+}
+
 /**
- * Build a tool filter based on prompt content.
+ * Return the allowed tool names for a query.
  * Always includes core tools; adds specialized tools only when keywords match.
  * When routingReason is 'simple-pattern', only send_message is loaded.
  */
-export function buildToolFilter(
+export function getAllowedTools(
   prompt: string,
   isMain: boolean,
   routingReason?: string,
-): (tool: { name: string }) => boolean {
+): string[] {
   if (routingReason === 'simple-pattern') {
-    return (tool) => tool.name === 'mcp__nanoclaw__send_message';
+    return ['mcp__nanoclaw__send_message'];
   }
   const allowed = new Set(CORE_TOOLS);
   for (const { pattern, tools } of TOOL_TRIGGERS) {
@@ -62,5 +76,5 @@ export function buildToolFilter(
     }
   }
   if (!isMain) allowed.delete('mcp__nanoclaw__register_group');
-  return (tool) => allowed.has(tool.name);
+  return [...allowed];
 }

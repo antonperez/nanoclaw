@@ -17,9 +17,7 @@ describe('checkBashCommand — allowed commands', () => {
   });
 
   it('allows pipe chains where every segment is allowed', () => {
-    expect(
-      checkBashCommand('curl -sL https://x.com | markitdown -x html'),
-    ).toBeNull();
+    expect(checkBashCommand('curl -sL https://x.com | markitdown')).toBeNull();
   });
 
   it('allows && chains where every segment is allowed', () => {

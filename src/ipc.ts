@@ -9,7 +9,7 @@ import { sendPoolMessage } from './channels/telegram.js';
 import { readEnvFile } from './env.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { ensureWithinBase, isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -68,15 +68,22 @@ function resolveAttachments(
 ): { filename: string; path: string; contentType: string }[] {
   const groupDir = path.join(GROUPS_DIR, groupFolder);
   return containerPaths
-    .map((p) => {
+    .flatMap((p) => {
       // Map /workspace/group/... → groups/{groupFolder}/...
       const relative = p.replace(/^\/workspace\/group\//, '');
-      const hostPath = path.join(groupDir, relative);
-      return {
-        filename: path.basename(p),
-        path: hostPath,
-        contentType: mimeForPath(p),
-      };
+      const hostPath = path.resolve(groupDir, relative);
+      try {
+        ensureWithinBase(groupDir, hostPath);
+      } catch {
+        return []; // silently drop paths that escape the group directory
+      }
+      return [
+        {
+          filename: path.basename(p),
+          path: hostPath,
+          contentType: mimeForPath(p),
+        },
+      ];
     })
     .filter((a) => fs.existsSync(a.path));
 }

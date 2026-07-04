@@ -1,35 +1,32 @@
 # Model Routing
 
-NanoClaw routes messages between Gemini (default), Claude containers, DeepSeek, and a local Ollama model.
+NanoClaw routes messages between Claude containers (default), Gemini, DeepSeek, and a local Ollama model.
 The routing logic lives in `src/model-router.ts` and runs in the host process before any container is spawned.
 
-## Default: Gemini 2.5 Flash
+## Layer 1 — Backend routing (host process, `src/model-router.ts`)
 
-All messages go to Gemini by default. Gemini has read/write access to `.md` files in the group folder, so it can save notes, tasks, and memory between conversations.
+Prefix triggers fire only when the keyword is the **first word** (case-insensitive). Mid-sentence mentions stay on Claude.
 
-## Triggers — all prefix-only
+| Prefix | Backend |
+|--------|---------|
+| `gem`, `gemini` | Gemini 2.5 Flash |
+| `ds`, `deepseek` | DeepSeek |
+| `vault`, `ollama` | Local Ollama |
+| *(anything else)* | Claude container (default) |
 
-A trigger only fires when the keyword is the **first word** of the message (case-insensitive, leading whitespace tolerated). Mid-sentence mentions stay on the default Gemini path.
+## Layer 2 — Claude model routing (inside container, `container/agent-runner/src/query-classifier.ts`)
 
-| Backend | Triggers | Example |
-|---------|----------|---------|
-| **Claude container** (Sonnet, full tools) | `claude`, `andy`, `/council` | "andy, help me debug this" |
-| **DeepSeek** | `ds`, `deepseek` | "ds write a sorting algorithm" |
-| **Ollama** (local Pi) | `vault`, `ollama` | "vault, what's 2+2?" |
-| **Gemini** (explicit, same as default) | `gem`, `gemini` | "gem summarize this" |
-
-What this means in practice:
-- ✓ `andy, read me on Tejas` → Claude
-- ✗ `what did andy say yesterday` → **Gemini** (no longer false-positives to Claude)
-- ✗ `compare claude.ai vs gemini` → **Gemini**
-- ✗ `let's use ollama locally` → **Gemini**
-
-Note: `/wiki ingest` and `/wiki lint` run on Gemini (has bash tool). Only force Claude with `andy /wiki ingest` if Gemini fails.
+| Condition | Model | Examples |
+|-----------|-------|---------|
+| `o:` prefix | Opus 4.8 | `o: second-order think this`, `o: analyse the situation` |
+| `r:` / `remember:` prefix | Sonnet | `r: udemy access via BDO`, `remember: therapy next week` |
+| Scheduled / cron task | Sonnet | *(automatic)* |
+| *(everything else)* | **Sonnet 5** | questions, ingest, analysis, general chat |
 
 ## Configuration (.env)
 
 ```
-GEMINI_API_KEY=                  # Google AI Studio API key (required for default path)
+GEMINI_API_KEY=                  # Google AI Studio API key (for explicit gem/gemini prefix)
 GEMINI_MODEL=gemini-2.5-flash    # Model name
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai  # OpenAI-compat endpoint
 
@@ -37,7 +34,7 @@ OLLAMA_HOST=http://localhost:11434   # Ollama API base URL
 OLLAMA_MODEL=anton-vault             # Local model name
 ```
 
-NanoClaw routes Claude container traffic directly to `https://api.anthropic.com` using `ANTHROPIC_AUTH_TOKEN` (pay-per-token API billing, separate from any claude.ai subscription).
+Claude container traffic goes through the credential proxy (port 3001) using OAuth via `~/.claude/.credentials.json`.
 
 ## Key Files
 
