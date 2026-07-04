@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyQuery, buildToolFilter, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
+import { classifyQuery, getAllowedTools, isRPrefix, stripRPrefix } from './query-classifier.js';
 
 // --- classifyQuery ---
 
@@ -134,20 +134,11 @@ describe('getAllowedTools', () => {
   });
 });
 
-// --- buildToolFilter ---
+// --- getAllowedTools ---
 
-describe('buildToolFilter', () => {
-  const allTools = [
-    'Bash', 'Read', 'Write',
-    'mcp__nanoclaw__send_message', 'mcp__nanoclaw__web_fetch',
-    'mcp__nanoclaw__manage_tasks',
-    'mcp__nanoclaw__send_email', 'mcp__nanoclaw__dav_request',
-    'mcp__nanoclaw__register_group',
-  ].map(name => ({ name }));
-
+describe('getAllowedTools', () => {
   function filterNames(prompt: string, isMain = true, routingReason?: string): string[] {
-    const filter = buildToolFilter(prompt, isMain, routingReason);
-    return allTools.filter(filter).map(t => t.name);
+    return getAllowedTools(prompt, isMain, routingReason);
   }
 
   it('always includes core tools', () => {

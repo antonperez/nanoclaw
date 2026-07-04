@@ -271,9 +271,6 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Default to Sonnet — subagents/tools can still escalate to Opus when needed
-  args.push('-e', 'CLAUDE_MODEL=sonnet');
-
   // iCloud DAV base URL — agents use this to make CalDAV/CardDAV requests via the proxy
   args.push(
     '-e',

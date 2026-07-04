@@ -248,7 +248,7 @@ export function ensureFreshOAuthToken(): string | undefined {
         '--print',
         '.',
         '--model',
-        'claude-haiku-4-5-20251001',
+        'claude-haiku-4-5',
         '--max-turns',
         '1',
       ],

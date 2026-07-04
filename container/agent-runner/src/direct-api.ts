@@ -41,32 +41,6 @@ export interface DirectQueryResult {
   sessionId?: string;          // CLI UUID returned for next --resume
 }
 
-// --- Cost calculation (kept for token logging compatibility) ---
-
-const SONNET_PRICING = { input: 3.0, output: 15.0, cache_read: 0.30, cache_creation: 3.75 };
-const OPUS_PRICING   = { input: 5.0, output: 25.0, cache_read: 0.50, cache_creation: 6.25 };
-const HAIKU_PRICING  = { input: 1.0, output:  5.0, cache_read: 0.10, cache_creation: 1.25 };
-
-function getPricing(model: string) {
-  if (model.includes('opus'))  return OPUS_PRICING;
-  if (model.includes('haiku')) return HAIKU_PRICING;
-  return SONNET_PRICING;
-}
-
-export function calcCost(
-  usage: DirectQueryResult['usage'],
-  model?: string,
-): number {
-  const p = model ? getPricing(model) : SONNET_PRICING;
-  return (
-    (usage.input_tokens                * p.input          +
-     usage.output_tokens               * p.output         +
-     usage.cache_read_input_tokens     * p.cache_read     +
-     usage.cache_creation_input_tokens * p.cache_creation) /
-    1_000_000
-  );
-}
-
 // --- Main query function ---
 
 export async function directQuery(

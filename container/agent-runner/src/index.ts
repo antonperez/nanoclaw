@@ -220,7 +220,7 @@ async function runQuery(
   const MODEL_ALIASES: Record<string, string> = {
     sonnet: 'claude-sonnet-5',
     opus: 'claude-opus-4-8',
-    haiku: 'claude-haiku-4-5-20251001',
+    haiku: 'claude-haiku-4-5',
   };
   const model = envModel ? (MODEL_ALIASES[envModel] || envModel) : routing.model;
   log(`Model routing: ${model} (reason: ${envModel ? 'env-override' : routing.reason})`);

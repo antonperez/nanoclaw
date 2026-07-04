@@ -78,16 +78,3 @@ export function getAllowedTools(
   if (!isMain) allowed.delete('mcp__nanoclaw__register_group');
   return [...allowed];
 }
-
-/**
- * Build a tool filter based on prompt content.
- * Delegates to getAllowedTools — kept for test compatibility.
- */
-export function buildToolFilter(
-  prompt: string,
-  isMain: boolean,
-  routingReason?: string,
-): (tool: { name: string }) => boolean {
-  const allowed = new Set(getAllowedTools(prompt, isMain, routingReason));
-  return (tool) => allowed.has(tool.name);
-}

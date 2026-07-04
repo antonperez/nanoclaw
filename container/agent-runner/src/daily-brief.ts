@@ -6,8 +6,8 @@
 
 import { spawn } from 'child_process';
 
-const HAIKU  = 'claude-haiku-4-5-20251001';
-const SONNET = 'claude-sonnet-4-20250514';
+const HAIKU  = 'claude-haiku-4-5';
+const SONNET = 'claude-sonnet-5';
 
 const BRIEF_SYSTEM = 'You are a concise news briefing assistant. Output ONLY the requested information. No greetings, no commentary. Use bullet points (•).';
 
