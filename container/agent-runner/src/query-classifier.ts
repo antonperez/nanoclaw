@@ -44,9 +44,11 @@ export function classifyQuery(
   prompt: string,
   isScheduledTask: boolean,
 ): { model: string; reason: string } {
-  if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
+  // Explicit prefixes override scheduled-task default so skills can request Haiku
+  // for cheap verification passes or Opus for heavyweight scheduled synthesis.
   if (O_PREFIX.test(prompt)) return { model: OPUS,   reason: 'o-prefix' };
   if (H_PREFIX.test(prompt)) return { model: HAIKU,  reason: 'h-prefix' };
+  if (isScheduledTask)        return { model: SONNET, reason: 'scheduled-task' };
   if (R_PREFIX.test(prompt)) return { model: SONNET, reason: 'r-prefix' };
   return { model: SONNET, reason: 'default-sonnet' };
 }
