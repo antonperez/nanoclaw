@@ -4,10 +4,14 @@
  */
 
 const SONNET = 'claude-sonnet-5';
-const OPUS = 'claude-opus-4-8';
+const OPUS   = 'claude-opus-4-8';
+const HAIKU  = 'claude-haiku-4-5-20251001';
 
 // o: prefix — user-controlled Opus override
 const O_PREFIX = /^\s*o:/i;
+
+// h: prefix — user-controlled Haiku override (cheap lookups, status checks, formatting)
+const H_PREFIX = /^\s*h:/i;
 
 // r: prefix — explicit memory write. Strips prefix, tells Andy to persist the fact.
 // Accepts: "r:", "r :", "remember:", "remember "
@@ -41,7 +45,8 @@ export function classifyQuery(
   isScheduledTask: boolean,
 ): { model: string; reason: string } {
   if (isScheduledTask) return { model: SONNET, reason: 'scheduled-task' };
-  if (O_PREFIX.test(prompt)) return { model: OPUS, reason: 'o-prefix' };
+  if (O_PREFIX.test(prompt)) return { model: OPUS,   reason: 'o-prefix' };
+  if (H_PREFIX.test(prompt)) return { model: HAIKU,  reason: 'h-prefix' };
   if (R_PREFIX.test(prompt)) return { model: SONNET, reason: 'r-prefix' };
   return { model: SONNET, reason: 'default-sonnet' };
 }

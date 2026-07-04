@@ -148,6 +148,13 @@ server.tool(
     }
 
     if (args.action === 'pause' || args.action === 'resume' || args.action === 'cancel') {
+      if (!args.task_id) {
+        return {
+          content: [{ type: 'text' as const, text: `task_id is required for ${args.action}. Call list first to get the task ID.` }],
+          isError: true,
+        };
+      }
+
       const data = {
         type: `${args.action}_task`,
         taskId: args.task_id,
@@ -159,12 +166,7 @@ server.tool(
       writeIpcFile(TASKS_DIR, data);
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Task ${args.task_id} ${args.action} requested.`,
-          },
-        ],
+        content: [{ type: 'text' as const, text: `Task ${args.task_id} ${args.action} requested.` }],
       };
     }
 
