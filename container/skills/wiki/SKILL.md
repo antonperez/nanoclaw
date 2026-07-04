@@ -44,8 +44,73 @@ For each source:
 5. **Update index** — Add/update entries in `wiki/index.md` for every page touched
 6. **Append to log** — `## [YYYY-MM-DD] ingest | Source Title` in `wiki/log.md`
 7. **Confirm** — Tell Anton what was created/updated and current wiki size
+8. **Schedule verification pass** — After every ingest, schedule a lightweight automated check:
 
-One source = fully processed, cross-referenced, indexed, and logged before moving on.
+   ```bash
+   # Get local time 2 minutes from now (Linux)
+   VERIFY_AT=$(date -d '+2 minutes' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date -v +2M '+%Y-%m-%dT%H:%M:%S')
+   echo "$VERIFY_AT"
+   ```
+
+   Then call `manage_tasks` with:
+   - `action`: `create`
+   - `schedule_type`: `once`
+   - `schedule_value`: the timestamp from above
+   - `prompt`: `h: wiki-verify: check last ingest in wiki/log.md. Read wiki/log.md (last 3 entries) and wiki/index.md. For the most recent ingest entry verify: (1) source summary page exists under wiki/sources/, (2) wiki/index.md has entries for every new page created, (3) each new page links to at least one other wiki page or workspace file (no orphans), (4) wiki/log.md entry is present. List any failures. Fix what you can directly. End with PASS or FAIL + count of issues.`
+
+   The `h:` prefix routes this to Haiku (cheap, fast, ~$0.001). Do not wait for or poll the result — it arrives as a separate message.
+
+One source = fully processed, cross-referenced, indexed, logged, and verified before moving on.
+
+---
+
+### Bulk Ingest `/wiki ingest bulk`
+
+When Anton provides multiple sources (a list of URLs, a folder of files, a batch), use the loop controller pattern. Never try to process all at once — write a queue and let the scheduler iterate.
+
+**Step 1 — Write the queue file**
+
+```bash
+cat > /workspace/group/sources/.ingest-queue.txt << 'EOF'
+https://example.com/article-1
+https://example.com/article-2
+/workspace/group/files/report.pdf
+EOF
+```
+
+One source per line. URLs and file paths both work.
+
+**Step 2 — Schedule the loop task**
+
+Call `manage_tasks` with `action: create` and these fields:
+
+- `schedule_type`: `once`
+- `schedule_value`: 1 minute from now (`date -d '+1 minute' '+%Y-%m-%dT%H:%M:%S'`)
+- `script`: the loop guard below (paste verbatim as the `script` field)
+- `prompt`: `Process the next wiki source from the queue. Script output contains {source, remaining}. Run the full /wiki ingest workflow for data.source: download/read, write wiki pages, update index and log. After completing, tell Anton: "Ingested: [title] — [remaining] remaining in queue."`
+
+**Loop guard script** (paste as `script` field):
+
+```bash
+#!/bin/bash
+QUEUE=/workspace/group/sources/.ingest-queue.txt
+if [ ! -f "$QUEUE" ] || [ ! -s "$QUEUE" ]; then
+  rm -f "$QUEUE"
+  echo '{"wakeAgent": false}'
+  exit 0
+fi
+NEXT=$(head -1 "$QUEUE")
+tail -n +2 "$QUEUE" > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"
+COUNT=$(wc -l < "$QUEUE" | tr -d ' ')
+printf '{"wakeAgent": true, "data": {"source": "%s", "remaining": %s}}\n' "$NEXT" "$COUNT"
+```
+
+**How it works**: Each run the script pops the next source and returns `wakeAgent: true`. The agent ingests it, the task auto-reschedules for the next iteration. When the queue is empty the script deletes it and returns `wakeAgent: false`, ending the loop automatically.
+
+- Progress is visible in `wiki/log.md` — one entry per source
+- Each source also triggers its own verification pass (step 8 of ingest)
+- Loop can be paused by calling `manage_tasks pause` with the task ID
+- To check progress: `cat /workspace/group/sources/.ingest-queue.txt | wc -l` shows remaining
 
 ---
 
